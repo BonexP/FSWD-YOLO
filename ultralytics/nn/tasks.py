@@ -1718,7 +1718,8 @@ def parse_model(d, ch, verbose=True):
                                             # The parser expects args[0] to be output channels, but for CBAM it's the same as input.
                                             # A cleaner way is to just use c1.
                 args = [c1]  # Our CBAM implementation only needs input channels.
-
+            if m is GhostBottleneck:
+                c1, c2 = ch[f], args[1]
             elif m is Block:
                 # args格式: [dim, drop_path, layer_scale_init_value]
                 args = [c1, *args]
