@@ -1126,6 +1126,28 @@ class C3k2(C2f):
         self.m = nn.ModuleList(
             C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
         )
+class C3k2Ghost(C2f):
+    """Another variant of C3k2 using Ghost Bottleneck."""
+
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, e: float = 0.5, g: int = 1, shortcut: bool = True
+    ):
+        """
+        Initialize C3k2 module with Ghost Bottleneck.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of blocks.
+            e (float): Expansion ratio.
+            g (int): Groups for convolutions.
+            shortcut (bool): Whether to use shortcut connections.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            # C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n),
+            GhostBottleneck(self.c, self.c, shortcut) for _ in range(n)
+        )
 
 
 class C3k(C3):
