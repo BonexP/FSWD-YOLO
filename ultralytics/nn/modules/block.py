@@ -2065,14 +2065,30 @@ class SpatialAttention(nn.Module):
         x = self.conv(x)
         return self.sigmoid(x)
 
-# class CBAM(nn.Module):
-#     def __init__(self, channels, ratio=16, kernel_size=7):
-#         print("kernel_size", kernel_size)
-#         super(CBAM, self).__init__()
-#         self.ca = ChannelAttention(channels, ratio)
-#         self.sa = SpatialAttention(kernel_size)
-#
-#     def forward(self, x):
-#         x = x * self.ca(x)  # Channel attention
-#         x = x * self.sa(x)  # Spatial attention
-#         return x
+
+
+class SimamModule(nn.Module):
+    def __init__(self, channels=None, e_lambda=1e-4):
+        super(SimamModule, self).__init__()
+
+        self.activaton = nn.Sigmoid()
+        self.e_lambda = e_lambda
+
+    def __repr__(self):
+        s = self.__class__.__name__ + '('
+        s += ('lambda=%f)' % self.e_lambda)
+        return s
+
+    @staticmethod
+    def get_module_name():
+        return "simam"
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+
+        n = w * h - 1
+
+        x_minus_mu_square = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
+        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
+
+        return x * self.activaton(y)

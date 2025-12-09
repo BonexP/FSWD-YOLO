@@ -59,6 +59,7 @@ from .block import (
     ResNetLayer,
     SCDown,
     TorchVision,
+    SimamModule
 )
 from .conv import (
     CBAM,
@@ -183,5 +184,6 @@ __all__ = (
     "TorchVision",
     "Index",
     "A2C2f",
-    "CBAM"
+    "CBAM",
+    "SimamModule"
 )
