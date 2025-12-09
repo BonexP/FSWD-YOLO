@@ -68,6 +68,7 @@ from ultralytics.nn.modules import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+    C3k2Ghost
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1652,7 +1653,8 @@ def parse_model(d, ch, verbose=True):
             Block, # ConvNeXt Block
             ConvNeXt, # ConvNeXt model
             LayerNorm, # ConvNeXt LayerNorm
-            CBAM # Convolutional Block Attention Module
+            CBAM, # Convolutional Block Attention Module
+            C3k2Ghost
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
