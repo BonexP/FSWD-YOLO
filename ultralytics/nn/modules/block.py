@@ -1126,6 +1126,8 @@ class C3k2(C2f):
         self.m = nn.ModuleList(
             C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
         )
+
+
 class C3k2Ghost(C2f):
     """Another variant of C3k2 using Ghost Bottleneck."""
 
@@ -1144,16 +1146,14 @@ class C3k2Ghost(C2f):
             shortcut (bool): Whether to use shortcut connections.
         """
         super().__init__(c1, c2, n, shortcut, g, e)
-        self.m = nn.ModuleList(
-            # C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n),
-            GhostBottleneck(self.c, self.c, shortcut) for _ in range(n)
-        )
+        # GhostBottleneck signature is (c1, c2, k=3, s=1), so we only pass in/out channels here.
+        self.m = nn.ModuleList(GhostBottleneck(self.c, self.c) for _ in range(n))
+
+
 class C3k2GhostSimAM(C2f):
     """Another variant of C3k2 using Ghost Bottleneck, with SimAM attention."""
 
-    def __init__(
-        self, c1: int, c2: int, n: int = 1, e: float = 0.5, g: int = 1, shortcut: bool = True
-    ):
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5, g: int = 1, shortcut: bool = True):
         """
         Initialize C3k2 module with Ghost Bottleneck.
 
@@ -1166,10 +1166,16 @@ class C3k2GhostSimAM(C2f):
             shortcut (bool): Whether to use shortcut connections.
         """
         super().__init__(c1, c2, n, shortcut, g, e)
-        self.m = nn.Sequential(
-            *(GhostBottleneck(self.c, self.c, shortcut) for _ in range(n)),
-            SimamModule()
-        )
+        # 用多个 GhostBottleneck 替换原来的 Bottleneck
+        self.m = nn.ModuleList(GhostBottleneck(self.c, self.c) for _ in range(n))
+        # 仅在输出上做一次 SimAM
+        self.attn = SimamModule()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = list(self.cv1(x).chunk(2, 1))   # [a, b], 每个 (B, c_, H, W)
+        y.extend(m(y[-1]) for m in self.m)  # 追加 n 个 GhostBottleneck 输出
+        out = self.cv2(torch.cat(y, 1))     # (B, c2, H, W)
+        return self.attn(out)               # 通道数不变, 仅加注意力
 
 
 class C3k(C3):
@@ -2136,3 +2142,4 @@ class SimamModule(nn.Module):
         y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
 
         return x * self.activaton(y)
+
