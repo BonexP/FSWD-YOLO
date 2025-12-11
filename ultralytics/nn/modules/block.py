@@ -1166,8 +1166,6 @@ class C3k2GhostSimAM(C2f):
             shortcut (bool): Whether to use shortcut connections.
         """
         super().__init__(c1, c2, n, shortcut, g, e)
-        # 用多个 GhostBottleneck 替换原来的 Bottleneck
-        self.m = nn.ModuleList(GhostBottleneck(self.c, self.c) for _ in range(n))
         # 仅在输出上做一次 SimAM
         self.attn = SimamModule()
 
@@ -1176,6 +1174,47 @@ class C3k2GhostSimAM(C2f):
         y.extend(m(y[-1]) for m in self.m)  # 追加 n 个 GhostBottleneck 输出
         out = self.cv2(torch.cat(y, 1))     # (B, c2, H, W)
         return self.attn(out)               # 通道数不变, 仅加注意力
+
+
+class C3k2GhostSimAMinner(C2f):
+    """Variant of C3k2GhostSimAM: apply SimAM after each GhostBottleneck instead of once on the merged output.
+
+    The structure is:
+        - split input into two parts via cv1, like C2f/C3k2GhostSimAM
+        - keep the first part as the shortcut branch
+        - pass the second part sequentially through n blocks, each block being:
+              x -> GhostBottleneck -> SimamModule
+        - collect all intermediate outputs (including the original split parts) and concatenate
+        - fuse with cv2 without extra attention afterwards
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5, g: int = 1, shortcut: bool = True):
+        """Initialize C3k2GhostSimAMinner module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of GhostBottleneck blocks.
+            e (float): Expansion ratio.
+            g (int): Groups for convolutions (kept for API consistency, not used here).
+            shortcut (bool): Whether to use shortcut connections in the underlying C2f.
+        """
+        # Reuse C2f wiring (cv1/cv2, internal channel split, etc.)
+        super().__init__(c1, c2, n, shortcut, g, e)
+        # Build blocks: each element is (GhostBottleneck -> SimamModule)
+        self.m = nn.ModuleList(nn.Sequential(GhostBottleneck(self.c, self.c), SimamModule()) for _ in range(n))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass with per-block SimAM attention.
+
+        The SimAM attention is applied *inside* each bottleneck path. The final merged
+        output of cv2 is returned directly without additional attention.
+        """
+        # Follow C2f/C3k2GhostSimAM pattern: split then iteratively process the second branch.
+        y = list(self.cv1(x).chunk(2, 1))  # [a, b]
+        for m in self.m:
+            y.append(m(y[-1]))
+        return self.cv2(torch.cat(y, 1))
 
 
 class C3k(C3):

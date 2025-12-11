@@ -61,7 +61,8 @@ from .block import (
     TorchVision,
     SimamModule,
     C3k2Ghost,
-    C3k2GhostSimAM
+    C3k2GhostSimAM,
+    C3k2GhostSimAMinner
 )
 from .conv import (
     CBAM,
@@ -189,5 +190,6 @@ __all__ = (
     "CBAM",
     "SimamModule",
     "C3k2Ghost",
-    "C3k2GhostSimAM"
+    "C3k2GhostSimAM",
+    "C3k2GhostSimAMinner"
 )
