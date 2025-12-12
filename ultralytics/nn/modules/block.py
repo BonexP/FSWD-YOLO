@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad, GSConv
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -2182,3 +2182,52 @@ class SimamModule(nn.Module):
 
         return x * self.activaton(y)
 
+
+class GSBottleneck(nn.Module):
+    # GS Bottleneck https://github.com/AlanLi1997/slim-neck-by-gsconv
+    def __init__(self, c1, c2, k=3, s=1):
+        super().__init__()
+        c_ = c2 // 2
+        # for lighting
+        self.conv_lighting = nn.Sequential(
+            GSConv(c1, c_, 1, 1, 0),
+            GSConv(c_, c2, 3, 1, 1, act=True))
+        self.shortcut = Conv(c1, c2, 1, 1, act=False)
+
+    def forward(self, x):
+        return self.conv_lighting(x) + self.shortcut(x)
+
+
+class GSBottleneckC(GSBottleneck):
+    # cheap GS Bottleneck https://github.com/AlanLi1997/slim-neck-by-gsconv
+    def __init__(self, c1, c2, k=3, s=1):
+        super().__init__(c1, c2, k, s)
+        self.shortcut = DWConv(c1, c2, 3, 1, act=False)
+
+
+class VoVGSCSP(nn.Module):
+    # VoVGSCSP module with GSBottleneck
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        # self.cv2 = Conv(c1, c_, 1, 1)
+        # self.gc1 = GSConv(c_, c_, 1, 1)
+        self.gc2 = GSConv(c1, c_, 3, 1, 1)
+        self.m = C2f(c_, c_, 1, 1)
+        # self.res = Conv(c_, c_, 3, 1, act=False)
+        self.cv3 = Conv(2*c_, c2, 1)  #
+
+    def forward(self, x):
+
+        x1 = self.m(self.cv1(x))
+        y = self.gc2(x)
+        return self.cv3(torch.cat((y, x1), dim=1))
+
+
+class VoVGSCSPC(VoVGSCSP):
+    # cheap VoVGSCSP module with GSBottleneck
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, e)
+        c_ = int(c2 * e)  # hidden channels
+        self.gsb = GSBottleneckC(c_, c_, 3, 1)

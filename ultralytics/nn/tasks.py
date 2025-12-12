@@ -70,7 +70,7 @@ from ultralytics.nn.modules import (
     v10Detect,
     C3k2Ghost,
     C3k2GhostSimAM,
-    C3k2GhostSimAMinner
+    C3k2GhostSimAMinner, VoVGSCSP
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1658,7 +1658,8 @@ def parse_model(d, ch, verbose=True):
             CBAM, # Convolutional Block Attention Module
             C3k2Ghost,
             C3k2GhostSimAM,
-            C3k2GhostSimAMinner
+            C3k2GhostSimAMinner,
+            VoVGSCSP
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
