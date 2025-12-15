@@ -2228,6 +2228,14 @@ class VoVGSCSP(nn.Module):
 class VoVGSCSPC(VoVGSCSP):
     # cheap VoVGSCSP module with GSBottleneck
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
-        super().__init__(c1, c2, e)
+        # 1. 修正 super 调用，传递所有必要的参数以保持一致性
+        super().__init__(c1, c2, n, shortcut, g, e)
+
         c_ = int(c2 * e)  # hidden channels
-        self.gsb = GSBottleneckC(c_, c_, 3, 1)
+
+        # 2. 关键修改：覆盖父类的 self.m
+        # 父类中 self.m 是 C2f，这里我们将其替换为 GSBottleneckC
+        # 这样父类的 forward 方法中调用 self.m(self.cv1(x)) 时，实际执行的就是 GSBottleneckC
+        self.m = GSBottleneckC(c_, c_, 3, 1)
+
+        # 注意：原代码中的 self.gsb = ... 是多余且错误的，因为它从未被 forward 使用
