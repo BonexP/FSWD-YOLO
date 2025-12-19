@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Block modules."""
-
+import math
 from typing import List, Optional, Tuple
 
 import torch
@@ -2239,3 +2239,59 @@ class VoVGSCSPC(VoVGSCSP):
         self.m = GSBottleneckC(c_, c_, 3, 1)
 
         # 注意：原代码中的 self.gsb = ... 是多余且错误的，因为它从未被 forward 使用
+
+class Mix(nn.Module):
+    def __init__(self, m=-0.80):
+        super(Mix, self).__init__()
+        w = torch.nn.Parameter(torch.FloatTensor([m]), requires_grad=True)
+        self.w = w
+        self.mix_block = nn.Sigmoid()
+
+    def forward(self, fea1, fea2):
+        mix_factor = self.mix_block(self.w)
+        # 扩展维度以匹配特征图
+        out = fea1 * mix_factor.expand_as(fea1) + fea2 * (1 - mix_factor.expand_as(fea2))
+        return out
+
+class FCA_Attention(nn.Module):
+    # 论文名称为 FCA，建议类名改为 FCA_Attention 以避免混淆
+    def __init__(self, channel, b=1, gamma=2):
+        super(FCA_Attention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        # 计算自适应 kernel size k (参考 ECA-Net)
+        t = int(abs((math.log(channel, 2) + b) / gamma))
+        k = t if t % 2 else t + 1
+
+        self.conv1 = nn.Conv1d(1, 1, kernel_size=k, padding=int(k / 2), bias=False)
+        self.fc = nn.Conv2d(channel, channel, 1, padding=0, bias=True)
+        self.sigmoid = nn.Sigmoid()
+        self.mix = Mix()
+
+    def forward(self, input):
+        x = self.avg_pool(input)
+
+        # 维度调整以适应矩阵运算
+        # x1: Local Info
+        x1 = self.conv1(x.squeeze(-1).transpose(-1, -2)).transpose(-1, -2)
+        # x2: Global Info
+        x2 = self.fc(x).squeeze(-1).transpose(-1, -2)
+
+        # 相关性矩阵计算与聚合
+        # 注意：这里需要确保维度对齐，原代码中的维度操作较为复杂，以下是逻辑梳理后的标准流：
+        interaction = torch.matmul(x1, x2)
+
+        out1 = torch.sum(interaction, dim=1).unsqueeze(-1).unsqueeze(-1)  # Row extraction
+        out2 = torch.sum(interaction.transpose(-1, -2), dim=1).unsqueeze(-1).unsqueeze(-1)  # Col extraction
+
+        out1 = self.sigmoid(out1)
+        out2 = self.sigmoid(out2)
+
+        # 自适应融合
+        out = self.mix(out1, out2)
+
+        # 最后的平滑处理 (原代码逻辑)
+        out = self.conv1(out.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+        out = self.sigmoid(out)
+
+        return input * out

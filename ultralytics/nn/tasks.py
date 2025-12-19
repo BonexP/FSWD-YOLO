@@ -70,7 +70,9 @@ from ultralytics.nn.modules import (
     v10Detect,
     C3k2Ghost,
     C3k2GhostSimAM,
-    C3k2GhostSimAMinner, VoVGSCSP , VoVGSCSPC
+    C3k2GhostSimAMinner,
+    VoVGSCSP , VoVGSCSPC,
+    FCA_Attention
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1660,7 +1662,8 @@ def parse_model(d, ch, verbose=True):
             C3k2GhostSimAM,
             C3k2GhostSimAMinner,
             VoVGSCSP,
-            VoVGSCSPC
+            VoVGSCSPC,
+            FCA_Attention
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
