@@ -63,7 +63,8 @@ from .block import (
     C3k2Ghost,
     C3k2GhostSimAM,
     C3k2GhostSimAMinner,
-    VoVGSCSP, VoVGSCSPC
+    VoVGSCSP, VoVGSCSPC,
+    FCA_Attention
 )
 from .conv import (
     CBAM,
@@ -194,5 +195,6 @@ __all__ = (
     "C3k2GhostSimAM",
     "C3k2GhostSimAMinner",
     "VoVGSCSP",
-    "VoVGSCSPC"
+    "VoVGSCSPC",
+    "FCA_Attention"
 )
