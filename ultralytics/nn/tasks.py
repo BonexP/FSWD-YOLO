@@ -1699,8 +1699,10 @@ def parse_model(d, ch, verbose=True):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in base_modules:
+            if m is FCA_Attention:
+                args = [ch[f], *args]
             c1, c2 = ch[f], args[0]
-            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+            if c2 != nc and m is not FCA_Attention:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             if m is C2fAttn:  # set 1) embed channels and 2) num heads
                 args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)
@@ -1732,7 +1734,7 @@ def parse_model(d, ch, verbose=True):
             if m is GhostBottleneck:
                 c1, c2 = ch[f], args[1]
             if m is FCA_Attention:
-                c1 = ch[f]
+                args.pop(1)
             elif m is Block:
                 # args格式: [dim, drop_path, layer_scale_init_value]
                 args = [c1, *args]
