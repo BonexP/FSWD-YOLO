@@ -1731,6 +1731,8 @@ def parse_model(d, ch, verbose=True):
                 args = [c1]  # Our CBAM implementation only needs input channels.
             if m is GhostBottleneck:
                 c1, c2 = ch[f], args[1]
+            if m is FCA_Attention:
+                c1 = ch[f]
             elif m is Block:
                 # args格式: [dim, drop_path, layer_scale_init_value]
                 args = [c1, *args]
