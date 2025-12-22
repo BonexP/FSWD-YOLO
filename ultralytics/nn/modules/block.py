@@ -46,6 +46,7 @@ __all__ = (
     "C2fPSA",
     "C2PSA",
     "C2FCA",
+    "C2PSFCA",
     "FCABlock",
     "RepVGGDW",
     "CIB",
@@ -2369,3 +2370,45 @@ class C2FCA(nn.Module):
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
         b = self.m(b)
         return self.cv2(torch.cat((a, b), 1))
+
+
+class C2PSFCA(nn.Module):
+    """
+    C2PSFCA module with PSA and FCA attention mechanisms for enhanced feature extraction and processing.
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5):
+        """
+        Initialize C2PSFCA module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of blocks.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        assert c1 == c2
+        self.c = int(c1 * e)
+        self.cv1 = Conv(c1, 3 * self.c, 1, 1)
+        self.cv2 = Conv(3 * self.c, c1, 1)
+
+        self.m_psa = nn.Sequential(*(PSABlock(self.c, attn_ratio=0.5, num_heads=self.c // 64) for _ in range(n)))
+        self.m_fca = nn.Sequential(*(FCABlock(self.c) for _ in range(n)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Process the input tensor through PSA and FCA blocks.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after processing.
+        """
+        a, b, c = self.cv1(x).split((self.c, self.c, self.c), dim=1)
+        b = self.m_psa(b)
+        c = self.m_fca(c)
+        return self.cv2(torch.cat((a, b, c), 1))
+
+
