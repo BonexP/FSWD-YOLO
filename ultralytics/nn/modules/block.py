@@ -2298,10 +2298,11 @@ class FCA_Attention(nn.Module):
 
         return input * out
 
-
 class FCABlock(nn.Module):
     """
-    FCABlock class implementing a Frequency Channel Attention block for neural networks.
+    FCABlock class implementing a Frequency Channel Attention block.
+    This serves as a wrapper for FCA_Attention, removing the FFN found in PSABlock
+    to treat FCA_Attention as the primary unit.
     """
 
     def __init__(self, c: int, b: int = 1, gamma: int = 2, shortcut: bool = True) -> None:
@@ -2312,11 +2313,12 @@ class FCABlock(nn.Module):
             c (int): Input and output channels.
             b (int): Parameter b for calculating kernel size in FCA.
             gamma (int): Parameter gamma for calculating kernel size in FCA.
-            shortcut (bool): Whether to use shortcut connections.
+            shortcut (bool): Placeholder for shortcut argument to maintain API consistency.
         """
         super().__init__()
         self.attn = FCA_Attention(c, b=b, gamma=gamma)
-        self.ffn = nn.Sequential(Conv(c, c * 2, 1), Conv(c * 2, c, 1, act=False))
+        # FCA 通常是乘性注意力 (x * scale)，不像 Transformer Block 那样是加性残差 (x + attn(x))。
+        # 因此这里直接应用 attention，shortcut 参数保留用于接口兼容。
         self.add = shortcut
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -2327,11 +2329,9 @@ class FCABlock(nn.Module):
             x (torch.Tensor): Input tensor.
 
         Returns:
-            (torch.Tensor): Output tensor after attention and feed-forward processing.
+            (torch.Tensor): Output tensor after attention.
         """
-        x = x + self.attn(x) if self.add else self.attn(x)
-        x = x + self.ffn(x) if self.add else self.ffn(x)
-        return x
+        return self.attn(x)
 
 
 class C2FCA(nn.Module):
