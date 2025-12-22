@@ -45,6 +45,8 @@ __all__ = (
     "C3k2",
     "C2fPSA",
     "C2PSA",
+    "C2FCA",
+    "FCABlock",
     "RepVGGDW",
     "CIB",
     "C2fCIB",
@@ -2295,3 +2297,75 @@ class FCA_Attention(nn.Module):
         out = self.sigmoid(out)
 
         return input * out
+
+
+class FCABlock(nn.Module):
+    """
+    FCABlock class implementing a Frequency Channel Attention block for neural networks.
+    """
+
+    def __init__(self, c: int, b: int = 1, gamma: int = 2, shortcut: bool = True) -> None:
+        """
+        Initialize the FCABlock.
+
+        Args:
+            c (int): Input and output channels.
+            b (int): Parameter b for calculating kernel size in FCA.
+            gamma (int): Parameter gamma for calculating kernel size in FCA.
+            shortcut (bool): Whether to use shortcut connections.
+        """
+        super().__init__()
+        self.attn = FCA_Attention(c, b=b, gamma=gamma)
+        self.ffn = nn.Sequential(Conv(c, c * 2, 1), Conv(c * 2, c, 1, act=False))
+        self.add = shortcut
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Execute a forward pass through FCABlock.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after attention and feed-forward processing.
+        """
+        x = x + self.attn(x) if self.add else self.attn(x)
+        x = x + self.ffn(x) if self.add else self.ffn(x)
+        return x
+
+
+class C2FCA(nn.Module):
+    """
+    C2FCA module with FCA attention mechanism for enhanced feature extraction and processing.
+    """
+
+    def __init__(self, c1: int, c2: int, n: int = 1, e: float = 0.5):
+        """
+        Initialize C2FCA module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of FCABlock modules.
+            e (float): Expansion ratio.
+        """
+        super().__init__()
+        assert c1 == c2
+        self.c = int(c1 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv(2 * self.c, c1, 1)
+        self.m = nn.Sequential(*(FCABlock(self.c) for _ in range(n)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Process the input tensor through a series of FCA blocks.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after processing.
+        """
+        a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        b = self.m(b)
+        return self.cv2(torch.cat((a, b), 1))
