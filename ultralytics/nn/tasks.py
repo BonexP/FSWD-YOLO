@@ -1665,6 +1665,8 @@ def parse_model(d, ch, verbose=True):
             VoVGSCSP,
             VoVGSCSPC,
             FCA_Attention,
+            C2PSFCA,
+            C2FCA,
 
         }
     )
