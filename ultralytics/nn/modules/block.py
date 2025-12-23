@@ -2246,13 +2246,16 @@ class VoVGSCSPC(VoVGSCSP):
 class Mix(nn.Module):
     def __init__(self, m=-0.80):
         super(Mix, self).__init__()
+        # 定义一个可学习参数 w
         w = torch.nn.Parameter(torch.FloatTensor([m]), requires_grad=True)
         self.w = w
         self.mix_block = nn.Sigmoid()
 
     def forward(self, fea1, fea2):
+        # 生成动态权重 (0~1)
         mix_factor = self.mix_block(self.w)
-        # 扩展维度以匹配特征图
+        # 动态融合：根据 mix_factor 决定是偏向 fea1 还是 fea2
+        # 注意：expand_as 是为了处理 FCA (C,1,1) 和 PSA (C,H,W) 维度不一致的问题
         out = fea1 * mix_factor.expand_as(fea1) + fea2 * (1 - mix_factor.expand_as(fea2))
         return out
 
@@ -2412,3 +2415,80 @@ class C2PSFCA(nn.Module):
         return self.cv2(torch.cat((a, b, c), 1))
 
 
+# ----------------------
+# 1. 核心融合块 (Block Level)
+# ----------------------
+class FusionBlock(nn.Module):
+    """
+    具体的并行融合层：同时计算 PSA 和 FCA，然后用 Mix 融合
+    """
+
+    def __init__(self, c, attn_ratio=0.5, num_heads=4, shortcut=True):
+        super().__init__()
+        # 空间分支 (PSA)
+        # 注意：这里 shortcut 设为 True，因为 PSA 内部已经包含残差连接，返回的是“特征图+注意力”
+        self.psa = PSABlock(c, attn_ratio, num_heads, shortcut=True)
+
+        # 通道分支 (FCA)
+        self.fca = FCABlock(c, shortcut=True)
+
+        # 融合模块 (Mix)
+        self.fusion = Mix()
+
+    def forward(self, x):
+        # 1. 空间分支：关注“哪里重要”
+        x_spatial = self.psa(x)
+
+        # 2. 通道分支：关注“什么特征重要”
+        x_channel = self.fca(x)
+
+        # 3. 自适应融合：加权混合
+        # 结果 = w * x_spatial + (1-w) * x_channel
+        return self.fusion(x_spatial, x_channel)
+
+
+# ----------------------
+# 2. 模块外壳 (Module Level) - 即插即用替换 C2PSA
+# ----------------------
+class PAPSAFCA(nn.Module):
+    """
+    C2PSA 的直接替换版。
+    保留了 CSP 结构 (cv1 分流 -> 处理 -> cv2 汇合)，
+    只是把处理核心从“串行 PSA”换成了“并行 PSA+FCA”。
+    """
+
+    def __init__(self, c1, c2, n=1, e=0.5):
+        """
+        Args:
+            c1: 输入通道数
+            c2: 输出通道数
+            n:  Block 重复次数 (YOLO 配置文件中可能会传这个参数)
+            e:  扩张比例 (Expansion Ratio)，用于控制中间层的通道数
+        """
+        super().__init__()
+        assert c1 == c2
+        self.c = int(c1 * e)  # 修复：计算中间通道数
+
+        # CSP 分流卷积：将 c1 通道 变成 2*self.c
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+
+        # CSP 汇合卷积：将 2*self.c 变回 c1
+        self.cv2 = Conv(2 * self.c, c1, 1)
+
+        # 核心处理模块
+        # 使用我们定义的 FusionBlock
+        self.m = nn.Sequential(*(
+            FusionBlock(self.c, attn_ratio=0.5, num_heads=self.c // 64)
+            for _ in range(n)
+        ))
+
+    def forward(self, x):
+        # CSP 逻辑：
+        # 1. cv1 卷积后分割成两部分 a 和 b
+        a, b = self.cv1(x).split((self.c, self.c), dim=1)
+
+        # 2. b 部分进入我们的并行注意力融合模块
+        b = self.m(b)
+
+        # 3. 将原始的 a 和处理后的 b 拼接，再通过 cv2 融合
+        return self.cv2(torch.cat((a, b), 1))

@@ -71,9 +71,9 @@ from ultralytics.nn.modules import (
     C3k2Ghost,
     C3k2GhostSimAM,
     C3k2GhostSimAMinner,
-    VoVGSCSP , VoVGSCSPC,
+    VoVGSCSP, VoVGSCSPC,
     FCA_Attention,
-    C2PSFCA,C2FCA
+    C2PSFCA, C2FCA, PAPSAFCA
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1667,6 +1667,7 @@ def parse_model(d, ch, verbose=True):
             FCA_Attention,
             C2PSFCA,
             C2FCA,
+            PAPSAFCA
 
         }
     )
@@ -1685,7 +1686,7 @@ def parse_model(d, ch, verbose=True):
             RepC3,
             C2fPSA,
             C2fCIB,
-            C2PSA,C2FCA,C2PSFCA,
+            C2PSA,C2FCA,C2PSFCA, PAPSAFCA,
             A2C2f,
         }
     )
