@@ -2418,34 +2418,37 @@ class C2PSFCA(nn.Module):
 # ----------------------
 # 1. 核心融合块 (Block Level)
 # ----------------------
-class FusionBlock(nn.Module):
+class FusionBlock_Concat(nn.Module):
     """
-    具体的并行融合层：同时计算 PSA 和 FCA，然后用 Mix 融合
+    修正版：并行 PSA + FCA，使用 Concat + Conv 进行融合。
+    解决了标量门控导致的空间信息丢失和训练不稳定问题。
     """
 
     def __init__(self, c, attn_ratio=0.5, num_heads=4, shortcut=True):
         super().__init__()
-        # 空间分支 (PSA)
-        # 注意：这里 shortcut 设为 True，因为 PSA 内部已经包含残差连接，返回的是“特征图+注意力”
+        # 1. 空间分支 (PSA)
+        # 注意：PSA 输出通常保持输入尺度 (Residual)
         self.psa = PSABlock(c, attn_ratio, num_heads, shortcut=True)
 
-        # 通道分支 (FCA)
+        # 2. 通道分支 (FCA)
+        # 注意：FCA 是重标定 (Scale)，输出通常比 PSA 小
         self.fca = FCABlock(c, shortcut=True)
 
-        # 融合模块 (Mix)
-        self.fusion = Mix()
+        # 3. 融合层 (这是核心改进！)
+        # 将两个分支的结果 Concat (c+c=2c)，然后由卷积压缩回 c
+        # 这种方式让网络自动学习：对于某个像素，是 PSA 重要还是 FCA 重要
+        self.cv_fusion = Conv(2 * c, c, 1, 1)  # 1x1 卷积，stride=1
 
     def forward(self, x):
-        # 1. 空间分支：关注“哪里重要”
+        # 分支 1：空间增强
         x_spatial = self.psa(x)
 
-        # 2. 通道分支：关注“什么特征重要”
+        # 分支 2：通道增强
         x_channel = self.fca(x)
 
-        # 3. 自适应融合：加权混合
-        # 结果 = w * x_spatial + (1-w) * x_channel
-        return self.fusion(x_spatial, x_channel)
-
+        # 融合：拼接 -> 卷积
+        # 这种方式允许模型保留 x_spatial 的高亮区域，同时融合 x_channel 的语义筛选
+        return self.cv_fusion(torch.cat((x_spatial, x_channel), dim=1))
 
 # ----------------------
 # 2. 模块外壳 (Module Level) - 即插即用替换 C2PSA
@@ -2478,7 +2481,7 @@ class PAPSAFCA(nn.Module):
         # 核心处理模块
         # 使用我们定义的 FusionBlock
         self.m = nn.Sequential(*(
-            FusionBlock(self.c, attn_ratio=0.5, num_heads=self.c // 64)
+            FusionBlock_Concat(self.c, attn_ratio=0.5, num_heads=self.c // 64)
             for _ in range(n)
         ))
 
