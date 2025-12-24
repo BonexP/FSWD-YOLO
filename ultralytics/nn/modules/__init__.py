@@ -111,6 +111,7 @@ from .transformer import (
 from .convnext_backbone import ConvNeXtBackbone
 from .convnext import ConvNeXt, Block,LayerNorm
 
+from .debiformer import DebiFormer
 
 __all__ = (
     "Conv",
@@ -198,5 +199,6 @@ __all__ = (
     "VoVGSCSPC",
     "FCA_Attention",
     "C2FCA","C2PSFCA",
-    "PAPSAFCA"
+    "PAPSAFCA",
+    "DebiFormer"
 )

@@ -73,7 +73,8 @@ from ultralytics.nn.modules import (
     C3k2GhostSimAMinner,
     VoVGSCSP, VoVGSCSPC,
     FCA_Attention,
-    C2PSFCA, C2FCA, PAPSAFCA
+    C2PSFCA, C2FCA, PAPSAFCA,
+    DebiFormer
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1667,7 +1668,8 @@ def parse_model(d, ch, verbose=True):
             FCA_Attention,
             C2PSFCA,
             C2FCA,
-            PAPSAFCA
+            PAPSAFCA,
+            DebiFormer
 
         }
     )
@@ -1688,6 +1690,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,C2FCA,C2PSFCA, PAPSAFCA,
             A2C2f,
+            DebiFormer
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
