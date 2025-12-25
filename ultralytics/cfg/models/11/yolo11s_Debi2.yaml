@@ -21,13 +21,13 @@ backbone:
   - [-1, 2, C3k2, [512, True]]                # 6
   # DebiFormer at P4 (kept light: repeats=1, topk=4, n_win=7)
   # DebiFormer args: [c2, shortcut, g, e, k, n_win]
-  - [-1, 1, DebiFormer, [512, True, 1, 0.5, 4, 7]]   # 7  (Enhanced P4)
+  - [-1, 1, DebiFormer, [512, True, 1, 0.5, 1, 7]]   # 7  (Enhanced P4)
 
   - [-1, 1, Conv, [1024, 3, 2]]               # 8-P5/32
   - [-1, 2, C3k2, [1024, True]]               # 9
   - [-1, 1, SPPF, [1024, 5]]                  # 10
   # Replace original C2PSA with DebiFormer at P5 (topk slightly smaller)
-  - [-1, 1, DebiFormer, [1024, True, 1, 0.5, 3, 7]]  # 11 (Enhanced P5)
+  - [-1, 1, DebiFormer, [1024, True, 1, 0.5, 1, 7]]  # 11 (Enhanced P5)
 
 # Head
 head:

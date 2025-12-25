@@ -101,7 +101,8 @@ class BiLevelRoutingAttention(nn.Module):
         self.n_win = n_win
         self.num_heads = num_heads
         self.qk_dim = dim
-        self.scale = self.qk_dim ** -0.5
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
         self.topk = topk
 
         self.lepe = nn.Conv2d(dim, dim, kernel_size=side_dwconv, stride=1, padding=side_dwconv // 2, groups=dim)
@@ -181,7 +182,7 @@ class DeBiLevelRoutingAttention(nn.Module):
         # Dynamic config based on channel dimension for YOLO flexibility
         self.n_groups = max(1, dim // 64)
         self.stride_def = 2 if dim >= 256 else (4 if dim >= 128 else 8)  # Heuristic for stride based on depth
-        if dim >= 512: self.stride_def = 1
+        if dim >= 512: self.stride_def = 2
 
         # Calculate q_size for RPE table (default assumption if input_res not provided)
         # Assuming standard YOLO input 640. If dim=256 (P3/P4), size is approx 20-40.
@@ -218,12 +219,12 @@ class DeBiLevelRoutingAttention(nn.Module):
                       groups=self.n_group_channels, bias=False),
             LayerNormProxy(self.n_group_channels),
             nn.GELU(),
-            nn.Conv2d(self.n_group_channels, 1, 1, 1, 0, bias=False),
+            nn.Conv2d(self.n_group_channels, 2, 1, 1, 0, bias=False),
         )
 
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, eps=1e-6)
-        self.mlp = ConvFFN(dim, int(dim * 3))
+        self.mlp = ConvFFN(dim, int(dim * 2))
 
     def _get_ref_points(self, H_key, W_key, B, dtype, device):
         ref_y, ref_x = torch.meshgrid(
@@ -236,6 +237,16 @@ class DeBiLevelRoutingAttention(nn.Module):
         ref = ref[None, ...].expand(B * self.n_groups, -1, -1, -1)
         return ref
 
+    def _get_ref_points_on_x(self, H, W, Hk, Wk, B, dtype, device):
+        ref_y, ref_x = torch.meshgrid(
+            torch.linspace(0.5, H - 0.5, Hk, dtype=dtype, device=device),
+            torch.linspace(0.5, W - 0.5, Wk, dtype=dtype, device=device),
+            indexing='ij'
+        )
+        ref = torch.stack((ref_y, ref_x), -1)  # (Hk,Wk,2) in x-coordinate system
+        ref[..., 1] = ref[..., 1] / W * 2 - 1
+        ref[..., 0] = ref[..., 0] / H * 2 - 1
+        return ref[None, ...].expand(B * self.n_groups, -1, -1, -1)
     def _get_q_grid(self, H, W, B, dtype, device):
         ref_y, ref_x = torch.meshgrid(
             torch.arange(0, H, dtype=dtype, device=device),
@@ -276,8 +287,8 @@ class DeBiLevelRoutingAttention(nn.Module):
         offset_q = offset_q.tanh()  # Optional: mul(range_factor)
         offset_q = rearrange(offset_q, 'b p h w -> b h w p')
 
-        reference = self._get_ref_points(Hk, Wk, N, dtype, device)
-        pos_k = (offset_q + reference).clamp(-1., +1.)
+        reference = self._get_ref_points_on_x(H, W, Hk, Wk, N, dtype, device)
+        pos_k = (offset_q + reference).clamp(-1., 1.)
 
         # Sample Q
         x_sampled_q = F.grid_sample(
@@ -376,7 +387,7 @@ class DebiFormerBlock(nn.Module):
         self.attn = DeBiLevelRoutingAttention(dim, num_heads=num_heads, n_win=n_win, topk=topk)
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
-        self.mlp = ConvFFN(dim, int(dim * 4))
+        self.mlp = ConvFFN(dim, int(dim * 2))
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
     def forward(self, x):
@@ -417,14 +428,13 @@ class DebiFormer(nn.Module):
 
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=4, n_win=7):
         super().__init__()
-        self.c = c2
-        # Input projection if channels change
-        self.cv1 = nn.Conv2d(c1, c2, 1, 1) if c1 != c2 else nn.Identity()
-
-        num_heads = max(1, c2 // 32)
-        self.m = nn.Sequential(*(DebiFormerBlock(c2, num_heads=num_heads, n_win=n_win, topk=k) for _ in range(n)))
+        c_ = max(64, int(c2 * e))  # bottleneck channels, e=0.5时减半
+        self.cv1 = nn.Conv2d(c1, c_, 1, 1, 0)
+        self.cv2 = nn.Conv2d(c_, c2, 1, 1, 0)
+        num_heads = min(8, max(1, c_ // 64))  # 再保守一点
+        self.m = nn.Sequential(*(DebiFormerBlock(c_, num_heads=num_heads, n_win=n_win, topk=k) for _ in range(n)))
 
     def forward(self, x):
-        x = self.cv1(x)
-        x = self.m(x)
-        return x
+        y = self.cv1(x)
+        y = self.m(y)
+        return self.cv2(y)
