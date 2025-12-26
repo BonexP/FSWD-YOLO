@@ -14,6 +14,8 @@ from ultralytics.utils.torch_utils import autocast
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
 
+from ultralytics.utils import LOGGER
+
 
 class VarifocalLoss(nn.Module):
     """
@@ -108,10 +110,11 @@ class DFLoss(nn.Module):
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses for bounding boxes."""
 
-    def __init__(self, reg_max: int = 16):
+    def __init__(self, reg_max: int = 16, iou_type: str = "CIoU"):
         """Initialize the BboxLoss module with regularization maximum and DFL settings."""
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.iou_type = iou_type
 
     def forward(
         self,
@@ -125,7 +128,18 @@ class BboxLoss(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+        # Select IoU calculation method based on iou_type
+        if self.iou_type == "ShapeIoU":
+            from .metrics import bbox_shape_iou
+            iou = bbox_shape_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False)
+        elif self.iou_type == "GIoU":
+            iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, GIoU=True)
+        elif self.iou_type == "DIoU":
+            iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, DIoU=True)
+        elif self.iou_type == "CIoU":
+            iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+        else:  # Standard IoU
+            iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
@@ -142,9 +156,10 @@ class BboxLoss(nn.Module):
 class RotatedBboxLoss(BboxLoss):
     """Criterion class for computing training losses for rotated bounding boxes."""
 
-    def __init__(self, reg_max: int):
+    def __init__(self, reg_max: int, iou_type: str = "CIoU"):
         """Initialize the RotatedBboxLoss module with regularization maximum and DFL settings."""
-        super().__init__(reg_max)
+        super().__init__(reg_max, iou_type)
+
 
     def forward(
         self,
@@ -211,8 +226,12 @@ class v8DetectionLoss:
         self.use_dfl = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        # Get iou_type from hyperparameters, default to CIoU
+        iou_type = getattr(h, "iou_type", "CIoU")
+        self.bbox_loss = BboxLoss(m.reg_max, iou_type=iou_type).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
+        # 🔥 添加这里: 打印正在使用的 IoU 类型
+        LOGGER.info(f"Detection Loss initialized with IoU type: {iou_type}")
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets by converting to tensor format and scaling coordinates."""
@@ -659,7 +678,8 @@ class v8OBBLoss(v8DetectionLoss):
         """Initialize v8OBBLoss with model, assigner, and rotated bbox loss; model must be de-paralleled."""
         super().__init__(model)
         self.assigner = RotatedTaskAlignedAssigner(topk=10, num_classes=self.nc, alpha=0.5, beta=6.0)
-        self.bbox_loss = RotatedBboxLoss(self.reg_max).to(self.device)
+        iou_type = getattr(self.hyp, "iou_type", "CIoU")
+        self.bbox_loss = RotatedBboxLoss(self.reg_max, iou_type=iou_type).to(self.device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets for oriented bounding box detection."""

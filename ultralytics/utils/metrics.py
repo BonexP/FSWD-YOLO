@@ -144,6 +144,72 @@ def bbox_iou(
     return iou  # IoU
 
 
+def bbox_shape_iou(
+    box1: torch.Tensor, box2: torch.Tensor, xywh: bool = True, scale: float = 0.0, eps: float = 1e-7
+) -> torch.Tensor:
+    """
+    Calculate Shape-IoU between bounding boxes.
+    
+    Shape-IoU considers both the shape and distance of bounding boxes by applying
+    adaptive weight factors based on the aspect ratio of target boxes.
+    
+    Args:
+        box1 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
+        box2 (torch.Tensor): A tensor representing one or more bounding boxes, with the last dimension being 4.
+        xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in
+                               (x1, y1, x2, y2) format.
+        scale (float, optional): Power scale factor for shape weight calculation. Default is 0.0.
+        eps (float, optional): A small value to avoid division by zero.
+    
+    Returns:
+        (torch.Tensor): Shape-IoU values.
+    
+    References:
+        https://arxiv.org/abs/2312.17663
+    """
+    # Get the coordinates of bounding boxes
+    if xywh:  # transform from xywh to xyxy
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+    else:  # x1, y1, x2, y2 = box1
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+
+    # Intersection area
+    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
+        b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
+    ).clamp_(0)
+
+    # Union Area
+    union = w1 * h1 + w2 * h2 - inter + eps
+
+    # IoU
+    iou = inter / union
+
+    # Shape-Distance: adaptive weight factors based on target box aspect ratio
+    ww = 2 * w2.pow(scale) / (w2.pow(scale) + h2.pow(scale))
+    hh = 2 * h2.pow(scale) / (w2.pow(scale) + h2.pow(scale))
+    cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex width
+    ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
+    c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
+    center_distance_x = ((b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2)) / 4
+    center_distance_y = ((b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)) / 4
+    center_distance = hh * center_distance_x + ww * center_distance_y
+    distance = center_distance / c2
+
+    # Shape-Shape: penalize shape differences with adaptive weights
+    omiga_w = hh * (w1 - w2).abs() / w1.maximum(w2)
+    omiga_h = ww * (h1 - h2).abs() / h1.maximum(h2)
+    shape_cost = (1 - (-omiga_w).exp()).pow(4) + (1 - (-omiga_h).exp()).pow(4)
+
+    # Shape-IoU
+    return iou - distance - 0.5 * shape_cost
+
+
 def mask_iou(mask1: torch.Tensor, mask2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     """
     Calculate masks IoU.

@@ -3,6 +3,8 @@ from pathlib import Path
 from ultralytics import YOLO
 import ultralytics.data.build as build
 from ultralytics.data.weighted_dataset import YOLOWeightedDataset
+from ultralytics.utils.trainer_utils import print_training_config
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='YOLO11 Baseline Training Script')
@@ -18,6 +20,11 @@ def parse_args():
     parser.add_argument('--lr0', type=float, default=0.001, help='初始学习率')
     parser.add_argument('--weight-decay', type=float, default=0.0005, help='权重衰减')
     parser.add_argument('--momentum', type=float, default=0.937, help='动量')
+
+    # 损失函数选择
+    parser.add_argument('--iou-type', type=str, default='CIoU', 
+                        choices=['IoU', 'GIoU', 'DIoU', 'CIoU', 'ShapeIoU'],
+                        help='IoU 损失函数类型 (默认: CIoU)')
 
     # 性能关键参数
     parser.add_argument('--device', type=str, default='0', help='CUDA 设备，如 0 或 0,1')
@@ -53,6 +60,9 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
+
+    print_training_config(args)
+
     save_dir = Path(args.project) / args.name
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,6 +104,8 @@ if __name__ == '__main__':
     cache_opt = args.cache if args.cache in ('ram', 'disk') else False
     # build.YOLODataset = YOLOWeightedDataset  # 旧的强制猴子补丁可以删掉或保留为注释
 
+    print(f"🎯 使用 IoU 损失类型: {args.iou_type}")
+    
     model.train(
         data=args.cfg,
         imgsz=args.img_size,
@@ -111,6 +123,7 @@ if __name__ == '__main__':
         project=args.project,
         name=args.name,
         exist_ok=True,
+        iou_type=args.iou_type,  # 添加 IoU 类型参数
         **augment_config,
         warmup_epochs=args.warmup_epochs,
         close_mosaic=args.close_mosaic,
