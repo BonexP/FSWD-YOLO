@@ -80,8 +80,9 @@ from .conv import (
     Index,
     LightConv,
     RepConv,
-    SpatialAttention,
+    SpatialAttention
 )
+from .NewConcat import NewConcat
 from .head import (
     OBB,
     Classify,
@@ -200,5 +201,6 @@ __all__ = (
     "FCA_Attention",
     "C2FCA","C2PSFCA",
     "PAPSAFCA",
-    "DebiFormer"
+    "DebiFormer",
+    "NewConcat"
 )

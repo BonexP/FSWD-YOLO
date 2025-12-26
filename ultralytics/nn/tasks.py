@@ -74,7 +74,8 @@ from ultralytics.nn.modules import (
     VoVGSCSP, VoVGSCSPC,
     FCA_Attention,
     C2PSFCA, C2FCA, PAPSAFCA,
-    DebiFormer
+    DebiFormer,
+    NewConcat
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1764,6 +1765,26 @@ def parse_model(d, ch, verbose=True):
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        elif m is NewConcat:
+            # 约定 YAML: [out_channels, dim=1(可选)]
+            # - 只写一个值，如 [512] -> out_channels=512, dim=1
+            # - 写两个值，如 [512, 1] -> out_channels=512, dim=1
+
+            c1_list = [ch[x] for x in f] if isinstance(f, (list, tuple)) else [ch[f]]
+
+            if args is None:
+                args = []
+            if len(args) == 0:
+                raise ValueError("NewConcat 需要至少 1 个参数: out_channels，例如 [512].")
+
+            out_channels = int(args[0])
+            dim = int(args[1]) if len(args) > 1 else 1
+
+            # 传给模块：你需要让 NewConcat 的 __init__ 支持 (out_channels, dim=1, ...)
+            args = [out_channels, dim]
+
+            # 告诉 parser：该层输出通道是 out_channels，而不是 sum(ch)
+            c2 = out_channels
         elif m in frozenset(
             {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):
