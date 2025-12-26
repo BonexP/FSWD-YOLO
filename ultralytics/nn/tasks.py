@@ -1781,7 +1781,7 @@ def parse_model(d, ch, verbose=True):
             dim = int(args[1]) if len(args) > 1 else 1
 
             # 传给模块：你需要让 NewConcat 的 __init__ 支持 (out_channels, dim=1, ...)
-            args = [out_channels, dim]
+            args = [c1_list, out_channels, dim]
 
             # 告诉 parser：该层输出通道是 out_channels，而不是 sum(ch)
             c2 = out_channels
