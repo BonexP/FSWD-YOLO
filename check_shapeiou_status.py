@@ -70,8 +70,24 @@ def check_shapeiou_integration():
         print(f"❌ BboxLoss 不支持 ShapeIoU: {e}")
         all_checks.append(False)
 
-    # 4. 检查命令行参数
-    print("\n⚙️  检查命令行参数:")
+    # 4. 检查 YOLO 配置系统是否注册了 iou_type
+    print("\n⚙️  检查 YOLO 配置系统:")
+    print("-"*80)
+    try:
+        from ultralytics.utils import DEFAULT_CFG_DICT
+        if 'iou_type' in DEFAULT_CFG_DICT:
+            print(f"✅ iou_type 已在配置系统中注册 (默认值: {DEFAULT_CFG_DICT['iou_type']})")
+            all_checks.append(True)
+        else:
+            print("❌ iou_type 未在配置系统中注册")
+            print("   请检查 ultralytics/cfg/default.yaml")
+            all_checks.append(False)
+    except Exception as e:
+        print(f"❌ 无法检查配置系统: {e}")
+        all_checks.append(False)
+
+    # 5. 检查命令行参数
+    print("\n📋 检查命令行参数:")
     print("-"*80)
     try:
         with open("train.py", "r") as f:
@@ -125,6 +141,32 @@ def check_shapeiou_integration():
         all_checks.append(True)
     except Exception as e:
         print(f"❌ print_training_config 失败: {e}")
+        all_checks.append(False)
+
+    # 8. 测试配置验证（最关键的测试）
+    print("\n🔐 测试配置验证:")
+    print("-"*80)
+    try:
+        from ultralytics.cfg import get_cfg
+
+        # 测试 ShapeIoU 参数能否通过配置验证
+        overrides = {
+            'epochs': 10,
+            'batch': 4,
+            'iou_type': 'ShapeIoU',
+            'name': 'test',
+        }
+        cfg = get_cfg(overrides=overrides)
+
+        if hasattr(cfg, 'iou_type') and cfg.iou_type == 'ShapeIoU':
+            print("✅ 配置验证通过，iou_type 参数可以正常使用")
+            print(f"   验证值: {cfg.iou_type}")
+            all_checks.append(True)
+        else:
+            print("❌ 配置验证失败，iou_type 参数无效")
+            all_checks.append(False)
+    except Exception as e:
+        print(f"❌ 配置验证测试失败: {e}")
         all_checks.append(False)
 
     # 总结
