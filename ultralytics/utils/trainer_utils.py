@@ -14,18 +14,18 @@ def print_training_config(args):
     LOGGER.info(colorstr('bold', 'yellow', '🎯 YOLO11 Training Configuration'))
     LOGGER.info('='*80)
 
-    # 基本配置
+    # 基本配置 - 使用 getattr 安全获取属性
     LOGGER.info(colorstr('bold', '\n📁 Dataset & Model:'))
-    LOGGER.info(f"  Model:      {args.model}")
-    LOGGER.info(f"  Data:       {args.data}")
-    LOGGER.info(f"  Task:       {args.task}")
+    LOGGER.info(f"  Model:      {getattr(args, 'model', 'yolo11n.pt')}")
+    LOGGER.info(f"  Data:       {getattr(args, 'data', 'coco8.yaml')}")
+    LOGGER.info(f"  Task:       {getattr(args, 'task', 'detect')}")
 
-    # 训练参数
+    # 训练参数 - 使用 getattr 安全获取属性
     LOGGER.info(colorstr('bold', '\n🔧 Training Parameters:'))
-    LOGGER.info(f"  Epochs:     {args.epochs}")
-    LOGGER.info(f"  Batch size: {args.batch}")
-    LOGGER.info(f"  Image size: {args.imgsz}")
-    LOGGER.info(f"  Device:     {args.device}")
+    LOGGER.info(f"  Epochs:     {getattr(args, 'epochs', 100)}")
+    LOGGER.info(f"  Batch size: {getattr(args, 'batch', 16)}")
+    LOGGER.info(f"  Image size: {getattr(args, 'imgsz', 640)}")
+    LOGGER.info(f"  Device:     {getattr(args, 'device', 'cpu')}")
 
     # 🔥 IoU 配置 (突出显示)
     LOGGER.info(colorstr('bold', '\n📊 Loss Configuration:'))
@@ -43,27 +43,28 @@ def print_training_config(args):
     desc, color = iou_info.get(iou_type, ('Unknown', 'white'))
 
     LOGGER.info(f"  IoU Type:   {colorstr(color, 'bold', f'{iou_type} ({desc})')}")
-    LOGGER.info(f"  Box:        {args.box}")
-    LOGGER.info(f"  Cls:        {args.cls}")
-    LOGGER.info(f"  DFL:        {args.dfl}")
+    LOGGER.info(f"  Box:        {getattr(args, 'box', 7.5)}")
+    LOGGER.info(f"  Cls:        {getattr(args, 'cls', 0.5)}")
+    LOGGER.info(f"  DFL:        {getattr(args, 'dfl', 1.5)}")
 
-    # 优化器配置
+    # 优化器配置 - 使用 getattr 安全获取属性
     LOGGER.info(colorstr('bold', '\n⚡ Optimizer:'))
-    LOGGER.info(f"  Optimizer:  {args.optimizer}")
-    LOGGER.info(f"  LR0:        {args.lr0}")
-    LOGGER.info(f"  Momentum:   {args.momentum}")
-    LOGGER.info(f"  Weight decay: {args.weight_decay}")
+    LOGGER.info(f"  Optimizer:  {getattr(args, 'optimizer', 'auto')}")
+    LOGGER.info(f"  LR0:        {getattr(args, 'lr0', 0.01)}")
+    LOGGER.info(f"  Momentum:   {getattr(args, 'momentum', 0.937)}")
+    LOGGER.info(f"  Weight decay: {getattr(args, 'weight_decay', 0.0005)}")
 
     LOGGER.info('\n' + '='*80 + '\n')
 
 
 # 在 train.py 中使用:
-def main():
-    args = parse_args()
+# def main():
+#     args = parse_args()
+#
+#     # 打印配置
+#     print_training_config(args)
+#
+#     # 开始训练
+#     trainer = YOLO(args.model)
+#     trainer.train(**vars(args))
 
-    # 打印配置
-    print_training_config(args)
-
-    # 开始训练
-    trainer = YOLO(args.model)
-    trainer.train(**vars(args))
