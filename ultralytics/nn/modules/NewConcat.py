@@ -18,6 +18,11 @@ class NewConcat(nn.Module):
     - Improves feature quality by emphasizing multi-scale consistent features
     - More suitable for edge device deployment and real-time detection
     
+    Note on gradient flow:
+    - Element-wise multiplication is designed for typical YOLO architectures (2-3 branches)
+    - BatchNorm layers help maintain gradient stability during training
+    - For many branches (>4), consider enabling post_fusion for additional gradient paths
+    
     Args:
         in_channels_list (list[int]): List of input channel counts for each branch
         out_channels (int): Unified output channel dimension after alignment and fusion
@@ -125,6 +130,12 @@ class NewConcat(nn.Module):
         # - Enhances features that are consistently activated across multiple scales
         # - Suppresses noise/background that appears only in single scales
         # - Achieves "feature purification" for improved fusion quality
+        #
+        # Note: Element-wise multiplication is the core design from the paper.
+        # While it may cause gradient attenuation with many branches (>3-4),
+        # this is acceptable for typical YOLO neck architectures which usually
+        # fuse 2-3 feature maps. The BatchNorm layers before fusion help maintain
+        # gradient flow by normalizing activations.
         fused = aligned_features[0]
         for feat in aligned_features[1:]:
             # Key operation: element-wise multiplication
