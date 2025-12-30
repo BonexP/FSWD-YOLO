@@ -145,8 +145,8 @@ def test_user_requirements():
 
     try:
         # 加载原始用户的配置文件
-        print("\n加载 yolo11s_NewConcat2.yaml...")
-        model = YOLO('/home/user/projects/YOLO11/ultralytics/cfg/models/11/yolo11s_NewConcat2.yaml')
+        print("\n加载 yolo11s_NewConcat.yaml...")
+        model = YOLO('/home/user/projects/YOLO11/ultralytics/cfg/models/11/yolo11s_NewConcat.yaml')
         print("✅ 配置文件加载成功!")
 
         # 检查 NewConcat 层

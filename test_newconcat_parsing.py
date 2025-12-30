@@ -103,9 +103,9 @@ def test_newconcat_parsing():
     print("=" * 80)
 
     try:
-        # 尝试加载 yolo11s_NewConcat2.yaml
-        model = YOLO('/home/user/projects/YOLO11/ultralytics/cfg/models/11/yolo11s_NewConcat2.yaml')
-        print("\n✅ 成功加载 yolo11s_NewConcat2.yaml 配置")
+        # 尝试加载 yolo11s_NewConcat.yaml
+        model = YOLO('/home/user/projects/YOLO11/ultralytics/cfg/models/11/yolo11s_NewConcat.yaml')
+        print("\n✅ 成功加载 yolo11s_NewConcat.yaml 配置")
         print(f"模型结构加载成功，共 {len(model.model.model)} 层")
 
         # 查找 NewConcat 层

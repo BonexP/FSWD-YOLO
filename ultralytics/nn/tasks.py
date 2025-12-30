@@ -102,7 +102,7 @@ from ultralytics.utils.torch_utils import (
 )
 
 
-from .modules  import ConvNeXt, Block, ConvNeXtBackbone,LayerNorm
+# from .modules  import ConvNeXt, Block, ConvNeXtBackbone,LayerNorm
 
 from .modules import  CBAM
 
@@ -1657,9 +1657,9 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             A2C2f,
             # add ConvNeXt modules
-            Block, # ConvNeXt Block
-            ConvNeXt, # ConvNeXt model
-            LayerNorm, # ConvNeXt LayerNorm
+            # Block, # ConvNeXt Block
+            # ConvNeXt, # ConvNeXt model
+            # LayerNorm, # ConvNeXt LayerNorm
             CBAM, # Convolutional Block Attention Module
             C3k2Ghost,
             C3k2GhostSimAM,
@@ -1731,9 +1731,9 @@ def parse_model(d, ch, verbose=True):
                     args.extend((True, 1.2))
             if m is C2fCIB:
                 legacy = False
-            if m is ConvNeXt:
-                pass
-                # args格式: [in_chans, num_classes, depths, dims, drop_path_rate, layer_scale_init_value]
+            # if m is ConvNeXt:
+            #     pass
+            #     # args格式: [in_chans, num_classes, depths, dims, drop_path_rate, layer_scale_init_value]
             if m is CBAM:
                 c1, c2 = ch[f], ch[f]  # CBAM does not change channels, so c2 = c1
                 args = [c1, c2] + args[1:]  # Pass c1, c2 to CBAM constructor if needed, though our implementation only uses c1.
@@ -1744,10 +1744,10 @@ def parse_model(d, ch, verbose=True):
                 c1, c2 = ch[f], args[1]
             if m is FCA_Attention:
                 args.pop(1)
-            elif m is Block:
-                # args格式: [dim, drop_path, layer_scale_init_value]
-                args = [c1, *args]
-                c2 = c1  # Block输出通道数与输入相同
+            # elif m is Block:
+            #     # args格式: [dim, drop_path, layer_scale_init_value]
+            #     args = [c1, *args]
+            #     c2 = c1  # Block输出通道数与输入相同
             # 下面的代码不能取消注释，因为如果取消了，那么代码的逻辑就会出错，也就是直接走这里else出口。
             # else:
             #     args = [c1, c2, *args[1:]]

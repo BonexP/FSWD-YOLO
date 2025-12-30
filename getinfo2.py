@@ -1,7 +1,7 @@
 import torch
 from ultralytics import YOLO
 
-model = YOLO("ultralytics/cfg/models/11/yolo11s_Debi3.yaml").model.eval()
+model = YOLO("ultralytics/cfg/models/11/yolo11s_NewConcat.yaml").model.eval()
 
 model.info(detailed=True)
 x = torch.randn(1, 3, 640, 640, device="cpu")

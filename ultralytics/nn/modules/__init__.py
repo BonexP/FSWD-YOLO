@@ -109,8 +109,8 @@ from .transformer import (
     TransformerLayer,
 )
 # 在ultralytics/nn/modules/__init__.py中添加
-from .convnext_backbone import ConvNeXtBackbone
-from .convnext import ConvNeXt, Block,LayerNorm
+# from .convnext_backbone import ConvNeXtBackbone
+# from .convnext import ConvNeXt, Block,LayerNorm
 
 from .debiformer import DebiFormer
 
