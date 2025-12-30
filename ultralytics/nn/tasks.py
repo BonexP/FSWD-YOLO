@@ -1766,9 +1766,10 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m is NewConcat:
-            # 约定 YAML: [out_channels, dim=1(可选)]
-            # - 只写一个值，如 [512] -> out_channels=512, dim=1
-            # - 写两个值，如 [512, 1] -> out_channels=512, dim=1
+            # 约定 YAML: [out_channels, kernel_size(可选), use_dw(可选), post_fusion(可选)]
+            # - 只写一个值，如 [512] -> out_channels=512, 其他使用默认值(kernel_size=3, use_dw=True, post_fusion=False)
+            # - 写多个值，如 [512, 3, True, True] -> out_channels=512, kernel_size=3, use_dw=True, post_fusion=True
+            # NewConcat.__init__ 签名: (in_channels_list, out_channels, kernel_size=3, use_dw=True, post_fusion=False)
 
             c1_list = [ch[x] for x in f] if isinstance(f, (list, tuple)) else [ch[f]]
 
@@ -1777,11 +1778,14 @@ def parse_model(d, ch, verbose=True):
             if len(args) == 0:
                 raise ValueError("NewConcat 需要至少 1 个参数: out_channels，例如 [512].")
 
+            # 解析参数
             out_channels = int(args[0])
-            dim = int(args[1]) if len(args) > 1 else 1
+            kernel_size = int(args[1]) if len(args) > 1 else 3
+            use_dw = bool(args[2]) if len(args) > 2 else True
+            post_fusion = bool(args[3]) if len(args) > 3 else False
 
-            # 传给模块：你需要让 NewConcat 的 __init__ 支持 (out_channels, dim=1, ...)
-            args = [c1_list, out_channels, dim]
+            # 传给模块: NewConcat(in_channels_list, out_channels, kernel_size, use_dw, post_fusion)
+            args = [c1_list, out_channels, kernel_size, use_dw, post_fusion]
 
             # 告诉 parser：该层输出通道是 out_channels，而不是 sum(ch)
             c2 = out_channels
