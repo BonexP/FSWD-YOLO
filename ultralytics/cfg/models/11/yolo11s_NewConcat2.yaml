@@ -26,9 +26,9 @@ backbone:
 
 # YOLO11n head
     # NewConcat:
-  # 约定 YAML: [out_channels, dim=1(可选)]
-  # - 只写一个值，如 [512] -> out_channels=512, dim=1
-  # - 写两个值，如 [512, 1] -> out_channels=512, dim=1
+  # 约定 YAML: [out_channels, kernel_size(可选), use_dw(可选), post_fusion(可选)]
+  # - 只写一个值，如 [512] -> out_channels=512, kernel_size=3, use_dw=True, post_fusion=False
+  # - 写多个值，如 [512, 3, True, False] -> out_channels=512, kernel_size=3, use_dw=True, post_fusion=False
 
 head:
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
