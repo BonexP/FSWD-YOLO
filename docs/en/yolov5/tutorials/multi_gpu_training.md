@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to train YOLOv5 on multiple GPUs for optimal performance. Guide covers single and multiple machine setups with DistributedDataParallel.
 keywords: YOLOv5, multiple GPUs, machine learning, deep learning, PyTorch, data parallel, distributed data parallel, DDP, multi-GPU training
@@ -35,7 +35,7 @@ Select a pretrained model to start training from. Here we select [YOLOv5s](https
 ### Single GPU
 
 ```bash
-python train.py --batch 64 --data coco.yaml --weights yolov5s.pt --device 0
+python scripts/train.py --batch 64 --data coco.yaml --weights yolov5s.pt --device 0
 ```
 
 ### Multi-GPU [DataParallel](https://docs.pytorch.org/docs/stable/nn.html#torch.nn.DataParallel) Mode (⚠️ not recommended)
@@ -43,7 +43,7 @@ python train.py --batch 64 --data coco.yaml --weights yolov5s.pt --device 0
 You can increase the `device` to use Multiple GPUs in DataParallel mode.
 
 ```bash
-python train.py --batch 64 --data coco.yaml --weights yolov5s.pt --device 0,1
+python scripts/train.py --batch 64 --data coco.yaml --weights yolov5s.pt --device 0,1
 ```
 
 This method is slow and barely speeds up training compared to using just 1 GPU.
@@ -140,7 +140,7 @@ cd .. && rm -rf app && git clone https://github.com/ultralytics/yolov5 -b master
 cp data/coco.yaml data/coco_profile.yaml
 
 # profile
-python train.py --batch-size 16 --data coco_profile.yaml --weights yolov5l.pt --epochs 1 --device 0
+python scripts/train.py --batch-size 16 --data coco_profile.yaml --weights yolov5l.pt --epochs 1 --device 0
 python -m torch.distributed.run --nproc_per_node 2 train.py --batch-size 32 --data coco_profile.yaml --weights yolov5l.pt --epochs 1 --device 0,1
 python -m torch.distributed.run --nproc_per_node 4 train.py --batch-size 64 --data coco_profile.yaml --weights yolov5l.pt --epochs 1 --device 0,1,2,3
 python -m torch.distributed.run --nproc_per_node 8 train.py --batch-size 128 --data coco_profile.yaml --weights yolov5l.pt --epochs 1 --device 0,1,2,3,4,5,6,7
@@ -200,3 +200,4 @@ We would like to thank @MagicFrogSJTU, who did all the heavy lifting, and @glenn
 - [Train Mode](https://docs.ultralytics.com/modes/train/) - Learn about training YOLO models with Ultralytics
 - [Hyperparameter Tuning](https://docs.ultralytics.com/guides/hyperparameter-tuning/) - Optimize your model's performance
 - [Docker Quickstart Guide](https://docs.ultralytics.com/guides/docker-quickstart/) - Set up your Docker environment for training
+

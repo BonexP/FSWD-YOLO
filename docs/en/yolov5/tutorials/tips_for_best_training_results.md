@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Discover how to achieve optimal mAP and training results using YOLOv5. Learn essential dataset, model selection, and training settings best practices.
 keywords: YOLOv5 training, mAP, dataset best practices, model selection, training settings, YOLOv5 guide, YOLOv5 tutorial, machine learning
@@ -35,20 +35,20 @@ Larger models like YOLOv5x and [YOLOv5x6](https://github.com/ultralytics/yolov5/
 - **Start from Pretrained weights.** Recommended for small to medium-sized datasets (i.e. [VOC](https://github.com/ultralytics/yolov5/blob/master/data/VOC.yaml), [VisDrone](https://github.com/ultralytics/yolov5/blob/master/data/VisDrone.yaml), [GlobalWheat](https://github.com/ultralytics/yolov5/blob/master/data/GlobalWheat2020.yaml)). Pass the name of the model to the `--weights` argument. Models download automatically from the [latest YOLOv5 release](https://github.com/ultralytics/yolov5/releases).
 
     ```bash
-    python train.py --data custom.yaml --weights yolov5s.pt
-    python train.py --data custom.yaml --weights yolov5m.pt
-    python train.py --data custom.yaml --weights yolov5l.pt
-    python train.py --data custom.yaml --weights yolov5x.pt
-    python train.py --data custom.yaml --weights custom_pretrained.pt
+    python scripts/train.py --data custom.yaml --weights yolov5s.pt
+    python scripts/train.py --data custom.yaml --weights yolov5m.pt
+    python scripts/train.py --data custom.yaml --weights yolov5l.pt
+    python scripts/train.py --data custom.yaml --weights yolov5x.pt
+    python scripts/train.py --data custom.yaml --weights custom_pretrained.pt
     ```
 
 - **Start from Scratch.** Recommended for large datasets (i.e. [COCO](https://github.com/ultralytics/yolov5/blob/master/data/coco.yaml), [Objects365](https://github.com/ultralytics/yolov5/blob/master/data/Objects365.yaml), [OIv6](https://storage.googleapis.com/openimages/web/index.html)). Pass the model architecture YAML you are interested in, along with an empty `--weights ''` argument:
 
     ```bash
-    python train.py --data custom.yaml --weights '' --cfg yolov5s.yaml
-    python train.py --data custom.yaml --weights '' --cfg yolov5m.yaml
-    python train.py --data custom.yaml --weights '' --cfg yolov5l.yaml
-    python train.py --data custom.yaml --weights '' --cfg yolov5x.yaml
+    python scripts/train.py --data custom.yaml --weights '' --cfg yolov5s.yaml
+    python scripts/train.py --data custom.yaml --weights '' --cfg yolov5m.yaml
+    python scripts/train.py --data custom.yaml --weights '' --cfg yolov5l.yaml
+    python scripts/train.py --data custom.yaml --weights '' --cfg yolov5x.yaml
     ```
 
 ## Training Settings
@@ -93,3 +93,4 @@ The optimal batch size depends on your GPU memory. Larger batch sizes generally 
 ### How can I speed up YOLOv5 training?
 
 To speed up training, try: enabling mixed precision training with `--amp`, using multiple GPUs with `--device 0,1,2,3`, caching your dataset with `--cache`, and optimizing your batch size. Also consider using a smaller model variant like YOLOv5s if absolute accuracy isn't critical.
+

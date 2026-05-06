@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Kickstart your real-time object detection journey with Ultralytics YOLOv5! This guide covers installation, inference, and training to help you master YOLOv5 quickly.
 keywords: YOLOv5, Quickstart, real-time object detection, AI, ML, PyTorch, inference, training, Ultralytics, machine learning, deep learning, PyTorch Hub, COCO dataset
@@ -61,21 +61,22 @@ Replicate the YOLOv5 [COCO dataset](https://cocodataset.org/#home) benchmarks by
 
 ```bash
 # Train YOLOv5n on COCO128 for 3 epochs
-python train.py --data coco128.yaml --epochs 3 --weights yolov5n.pt --batch-size 128
+python scripts/train.py --data coco128.yaml --epochs 3 --weights yolov5n.pt --batch-size 128
 
 # Train YOLOv5s on COCO for 300 epochs
-python train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5s.yaml --batch-size 64
+python scripts/train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5s.yaml --batch-size 64
 
 # Train YOLOv5m on COCO for 300 epochs
-python train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5m.yaml --batch-size 40
+python scripts/train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5m.yaml --batch-size 40
 
 # Train YOLOv5l on COCO for 300 epochs
-python train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5l.yaml --batch-size 24
+python scripts/train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5l.yaml --batch-size 24
 
 # Train YOLOv5x on COCO for 300 epochs
-python train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5x.yaml --batch-size 16
+python scripts/train.py --data coco.yaml --epochs 300 --weights '' --cfg yolov5x.yaml --batch-size 16
 ```
 
 <img width="800" src="https://github.com/ultralytics/docs/releases/download/0/yolov5-training-curves.avif" alt="YOLOv5 training curves showing mAP and loss metrics over epochs for different model sizes (n, s, m, l, x) on the COCO dataset">
 
 To conclude, YOLOv5 is not only a state-of-the-art tool for object detection but also a testament to the power of [machine learning](https://www.ultralytics.com/glossary/machine-learning-ml) in transforming the way we interact with the world through visual understanding. As you progress through this guide and begin applying YOLOv5 to your projects, remember that you are at the forefront of a technological revolution, capable of achieving remarkable feats in [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv). Should you need further insights or support from fellow visionaries, you're invited to our [GitHub repository](https://github.com/ultralytics/yolov5), home to a thriving community of developers and researchers. Explore further resources like [Ultralytics HUB](https://www.ultralytics.com/hub) for dataset management and model training without code, or check out our [Solutions](https://www.ultralytics.com/solutions) page for real-world applications and inspiration. Keep exploring, keep innovating, and enjoy the marvels of YOLOv5. Happy detecting! 🌠🔍
+

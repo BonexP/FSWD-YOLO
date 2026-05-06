@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to use ClearML for tracking YOLOv5 experiments, data versioning, hyperparameter optimization, and remote execution with ease.
 keywords: ClearML, YOLOv5, machine learning, experiment tracking, data versioning, hyperparameter optimization, remote execution, ML pipeline
@@ -64,16 +64,16 @@ pip install clearml
 
 This will enable integration with the YOLOv5 training script. Every training run from now on will be captured and stored by the ClearML [experiment manager](https://docs.ultralytics.com/integrations/clearml/).
 
-If you want to change the `project_name` or `task_name`, use the `--project` and `--name` arguments of the `train.py` script, by default the project will be called `YOLOv5` and the task `Training`. PLEASE NOTE: ClearML uses `/` as a delimiter for subprojects, so be careful when using `/` in your project name!
+If you want to change the `project_name` or `task_name`, use the `--project` and `--name` arguments of the `scripts/train.py` script, by default the project will be called `YOLOv5` and the task `Training`. PLEASE NOTE: ClearML uses `/` as a delimiter for subprojects, so be careful when using `/` in your project name!
 
 ```bash
-python train.py --img 640 --batch 16 --epochs 3 --data coco8.yaml --weights yolov5s.pt --cache
+python scripts/train.py --img 640 --batch 16 --epochs 3 --data coco8.yaml --weights yolov5s.pt --cache
 ```
 
 or with custom project and task name:
 
 ```bash
-python train.py --project my_project --name my_training --img 640 --batch 16 --epochs 3 --data coco8.yaml --weights yolov5s.pt --cache
+python scripts/train.py --project my_project --name my_training --img 640 --batch 16 --epochs 3 --data coco8.yaml --weights yolov5s.pt --cache
 ```
 
 This will capture:
@@ -157,7 +157,7 @@ clearml-data close
 Now that you have a ClearML dataset, you can very simply use it to train custom YOLOv5 🚀 models!
 
 ```bash
-python train.py --img 640 --batch 16 --epochs 3 --data clearml://YOUR_DATASET_ID --weights yolov5s.pt --cache
+python scripts/train.py --img 640 --batch 16 --epochs 3 --data clearml://YOUR_DATASET_ID --weights yolov5s.pt --cache
 ```
 
 <br>
@@ -239,3 +239,4 @@ Check out the autoscalers getting started video below.
 ## Learn More
 
 For more information about integrating ClearML with Ultralytics models, check out our [ClearML integration guide](https://docs.ultralytics.com/integrations/clearml/) and explore how you can enhance your [MLOps workflow](https://www.ultralytics.com/blog/exploring-yolov8-ml-experiment-tracking-integrations) with other experiment tracking tools.
+

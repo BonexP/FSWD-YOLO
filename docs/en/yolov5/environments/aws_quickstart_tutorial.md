@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Discover how to set up and run Ultralytics YOLOv5 on AWS Deep Learning Instances. Follow our comprehensive guide to get started quickly and cost-effectively.
 keywords: YOLOv5, AWS, Deep Learning, Machine Learning, AWS EC2, YOLOv5 setup, Deep Learning Instances, AI, Object Detection, Ultralytics
@@ -71,7 +71,7 @@ With the environment ready, you can start using YOLOv5 for various tasks:
 
 ```bash
 # Train a YOLOv5 model on a custom dataset (e.g., coco128.yaml)
-python train.py --data coco128.yaml --weights yolov5s.pt --img 640
+python scripts/train.py --data coco128.yaml --weights yolov5s.pt --img 640
 
 # Validate the performance (Precision, Recall, mAP) of a trained model (e.g., yolov5s.pt)
 python val.py --weights yolov5s.pt --data coco128.yaml --img 640
@@ -108,3 +108,4 @@ free -h
 ```
 
 Congratulations! 🎉 You have successfully set up an AWS Deep Learning instance, installed Ultralytics YOLOv5, and are ready to perform [object detection](https://www.ultralytics.com/glossary/object-detection) tasks. Whether you're experimenting with pre-trained models or [training](https://docs.ultralytics.com/modes/train/) on your own data, this powerful setup provides a scalable foundation for your [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) projects. Should you encounter any issues, consult the extensive [AWS documentation](https://docs.aws.amazon.com/) and the helpful Ultralytics community resources like the [FAQ](https://docs.ultralytics.com/help/FAQ/). Happy detecting!
+

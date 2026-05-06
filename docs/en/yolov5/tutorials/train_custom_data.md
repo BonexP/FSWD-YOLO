@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to train YOLOv5 on your own custom datasets with easy-to-follow steps. Detailed guide on dataset preparation, model selection, and training process.
 keywords: YOLOv5, custom dataset, model training, object detection, machine learning, AI, YOLO model, PyTorch, dataset preparation, Ultralytics
@@ -145,7 +145,7 @@ Choose a [pretrained model](https://docs.ultralytics.com/models/) to initiate th
 
 ## 3. Train
 
-Begin the [model training](https://docs.ultralytics.com/modes/train/) using the `train.py` script. Essential arguments include:
+Begin the [model training](https://docs.ultralytics.com/modes/train/) using the `scripts/train.py` script. Essential arguments include:
 
 - `--img`: Defines the input [image size](https://docs.ultralytics.com/usage/cfg/#image-size) (e.g., `--img 640`). Larger sizes generally yield better accuracy but require more GPU memory.
 - `--batch`: Determines the [batch size](https://www.ultralytics.com/glossary/batch-size) (e.g., `--batch 16`). Choose the largest size your GPU can handle.
@@ -157,7 +157,7 @@ Pretrained weights are automatically downloaded from the [latest YOLOv5 release]
 
 ```bash
 # Example: Train YOLOv5s on the COCO128 dataset for 3 epochs
-python train.py --img 640 --batch 16 --epochs 3 --data coco128.yaml --weights yolov5s.pt
+python scripts/train.py --img 640 --batch 16 --epochs 3 --data coco128.yaml --weights yolov5s.pt
 ```
 
 !!! tip "Optimize Training Speed"
@@ -183,7 +183,7 @@ Getting started is straightforward:
 ```bash
 pip install comet_ml                                                          # 1. Install Comet library
 export COMET_API_KEY=YOUR_API_KEY_HERE                                        # 2. Set your Comet API key (create a free account at Comet.ml)
-python train.py --img 640 --epochs 3 --data coco128.yaml --weights yolov5s.pt # 3. Train your model - Comet automatically logs everything!
+python scripts/train.py --img 640 --epochs 3 --data coco128.yaml --weights yolov5s.pt # 3. Train your model - Comet automatically logs everything!
 ```
 
 Dive deeper into the supported features in our [Comet Integration Guide](https://docs.ultralytics.com/integrations/comet/). Learn more about Comet's capabilities from their official [documentation](https://bit.ly/yolov5-colab-comet-docs). Try the Comet Colab Notebook for a live demo: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1RG0WOQyxlDlo5Km8GogJpIEJlg_5lyYO?usp=sharing)
@@ -272,9 +272,9 @@ Training YOLOv5 on a custom dataset involves several key steps:
     pip install -r requirements.txt
     ```
 3.  **Create Dataset Configuration**: Define dataset paths, number of classes, and class names in a `dataset.yaml` file.
-4.  **Start Training**: Execute the `train.py` script, providing paths to your `dataset.yaml`, desired pretrained weights (e.g., `yolov5s.pt`), image size, batch size, and the number of epochs.
+4.  **Start Training**: Execute the `scripts/train.py` script, providing paths to your `dataset.yaml`, desired pretrained weights (e.g., `yolov5s.pt`), image size, batch size, and the number of epochs.
     ```bash
-    python train.py --img 640 --batch 16 --epochs 100 --data path/to/your/dataset.yaml --weights yolov5s.pt
+    python scripts/train.py --img 640 --batch 16 --epochs 100 --data path/to/your/dataset.yaml --weights yolov5s.pt
     ```
 
 ### Why should I use Ultralytics HUB for training my YOLO models?
@@ -308,3 +308,4 @@ Ultralytics provides flexible licensing tailored to different needs:
 - **Enterprise License**: A commercial license designed for businesses integrating YOLOv5 into proprietary products or services. This license removes the open-source obligations of AGPL-3.0, allowing for closed-source distribution. Visit our [Licensing page](https://www.ultralytics.com/license) for further details or to request an [Enterprise License](https://www.ultralytics.com/legal/enterprise-software-license).
 
 Select the license that aligns best with your project's requirements and distribution model.
+

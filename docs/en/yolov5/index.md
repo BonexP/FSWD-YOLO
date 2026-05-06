@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Explore comprehensive Ultralytics YOLOv5 documentation with step-by-step tutorials on training, deployment, and model optimization. Empower your vision projects today!
 keywords: YOLOv5, Ultralytics, object detection, computer vision, deep learning, AI, tutorials, PyTorch, model optimization, machine learning, neural networks, YOLOv5 tutorial
@@ -95,7 +95,7 @@ Ultralytics YOLOv5 is renowned for its high-speed and high-[accuracy](https://ww
 
 ### How can I train a custom YOLOv5 model on my dataset?
 
-Training a custom YOLOv5 model on your dataset involves a few key steps. First, prepare your dataset in the required format, annotated with labels. Then, configure the YOLOv5 training parameters and start the training process using the `train.py` script. For an in-depth tutorial on this process, consult our [Train Custom Data guide](tutorials/train_custom_data.md). It provides step-by-step instructions to ensure optimal results for your specific use case.
+Training a custom YOLOv5 model on your dataset involves a few key steps. First, prepare your dataset in the required format, annotated with labels. Then, configure the YOLOv5 training parameters and start the training process using the `scripts/train.py` script. For an in-depth tutorial on this process, consult our [Train Custom Data guide](tutorials/train_custom_data.md). It provides step-by-step instructions to ensure optimal results for your specific use case.
 
 ### Why should I use Ultralytics YOLOv5 over other object detection models like RCNN?
 
@@ -108,3 +108,4 @@ Optimizing YOLOv5 model performance involves tuning various hyperparameters and 
 ### What environments are supported for running YOLOv5 applications?
 
 Ultralytics YOLOv5 supports a variety of environments, including free GPU notebooks on [Gradient](https://bit.ly/yolov5-paperspace-notebook), [Google Colab](https://colab.research.google.com/github/ultralytics/yolov5/blob/master/tutorial.ipynb), and [Kaggle](https://www.kaggle.com/models/ultralytics/yolov5), as well as major cloud platforms like [Google Cloud](environments/google_cloud_quickstart_tutorial.md), [Amazon AWS](environments/aws_quickstart_tutorial.md), and [Azure](environments/azureml_quickstart_tutorial.md). [Docker images](https://hub.docker.com/r/ultralytics/yolov5) are also available for convenient setup. For a detailed guide on setting up these environments, check our [Supported Environments](#supported-environments) section, which includes step-by-step instructions for each platform.
+

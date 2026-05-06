@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to optimize YOLOv5 hyperparameters using genetic algorithms for improved training performance. Step-by-step instructions included.
 keywords: YOLOv5, hyperparameter evolution, genetic algorithms, machine learning, optimization, Ultralytics, hyperparameter tuning
@@ -33,7 +33,7 @@ YOLOv5 has about 30 hyperparameters used for various training settings. These ar
 ```yaml
 # YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
 # Hyperparameters for low-augmentation COCO training from scratch
-# python train.py --batch 64 --cfg yolov5n6.yaml --weights '' --data coco.yaml --img 640 --epochs 300 --linear
+# python scripts/train.py --batch 64 --cfg yolov5n6.yaml --weights '' --data coco.yaml --img 640 --epochs 300 --linear
 # See tutorials for hyperparameter evolution https://github.com/ultralytics/yolov5#tutorials
 
 lr0: 0.01 # initial learning rate (SGD=1E-2, Adam=1E-3)
@@ -83,20 +83,20 @@ def fitness(x):
 Evolution is performed about a base scenario which we seek to improve upon. The base scenario in this example is [fine-tuning](https://www.ultralytics.com/glossary/fine-tuning) COCO128 for 10 [epochs](https://www.ultralytics.com/glossary/epoch) using pretrained YOLOv5s. The base scenario training command is:
 
 ```bash
-python train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache
+python scripts/train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache
 ```
 
 To evolve hyperparameters **specific to this scenario**, starting from our initial values defined in **Section 1.**, and maximizing the fitness defined in **Section 2.**, append `--evolve`:
 
 ```bash
 # Single-GPU
-python train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --evolve
+python scripts/train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --evolve
 
 # Multi-GPU with delay
 for i in {0..7}; do
   sleep $((30 * i)) # 30-second delay (optional)
   echo "Starting GPU $i..."
-  nohup python train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --device $i --evolve > "evolve_gpu_$i.log" &
+  nohup python scripts/train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --device $i --evolve > "evolve_gpu_$i.log" &
 done
 
 # Continuous training (use with caution)
@@ -105,13 +105,13 @@ done
 #   echo "Starting continuous training on GPU $i..."
 #   (
 #     while true; do
-#       python train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --device $i --evolve > "evolve_gpu_$i.log"
+#       python scripts/train.py --epochs 10 --data coco128.yaml --weights yolov5s.pt --cache --device $i --evolve > "evolve_gpu_$i.log"
 #     done
 #   ) &
 # done
 ```
 
-The default evolution settings will run the base scenario 300 times, i.e. for 300 generations. You can modify generations via the `--evolve` argument, i.e. `python train.py --evolve 1000`.
+The default evolution settings will run the base scenario 300 times, i.e. for 300 generations. You can modify generations via the `--evolve` argument, i.e. `python scripts/train.py --evolve 1000`.
 
 The main genetic operators are **crossover** and **mutation**. In this work mutation is used, with an 80% probability and a 0.04 variance to create new offspring based on a combination of the best parents from all previous generations. Results are logged to `runs/evolve/exp/evolve.csv`, and the highest fitness offspring is saved every generation as `runs/evolve/hyp_evolved.yaml`:
 
@@ -176,3 +176,4 @@ Ultralytics provides a range of ready-to-use environments, each pre-installed wi
 <a href="https://github.com/ultralytics/yolov5/actions/workflows/ci-testing.yml"><img src="https://github.com/ultralytics/yolov5/actions/workflows/ci-testing.yml/badge.svg" alt="YOLOv5 CI"></a>
 
 This badge indicates that all [YOLOv5 GitHub Actions](https://github.com/ultralytics/yolov5/actions) Continuous Integration (CI) tests are successfully passing. These CI tests rigorously check the functionality and performance of YOLOv5 across various key aspects: [training](https://github.com/ultralytics/yolov5/blob/master/train.py), [validation](https://github.com/ultralytics/yolov5/blob/master/val.py), [inference](https://github.com/ultralytics/yolov5/blob/master/detect.py), [export](https://github.com/ultralytics/yolov5/blob/master/export.py), and [benchmarks](https://github.com/ultralytics/yolov5/blob/master/benchmarks.py). They ensure consistent and reliable operation on macOS, Windows, and Ubuntu, with tests conducted every 24 hours and upon each new commit.
+

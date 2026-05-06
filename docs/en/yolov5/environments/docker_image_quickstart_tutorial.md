@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to set up and run YOLOv5 in a Docker container with step-by-step instructions for CPU and GPU environments, mounting volumes, and using display servers.
 keywords: YOLOv5, Docker, Ultralytics, setup, guide, tutorial, machine learning, deep learning, AI, GPU, NVIDIA, container, X11, Wayland
@@ -114,7 +114,7 @@ You are now inside the running YOLOv5 Docker container! From here, you can execu
 
 ```bash
 # Train a YOLOv5 model on your custom dataset (ensure data is mounted or downloaded)
-python train.py --data your_dataset.yaml --weights yolov5s.pt --img 640 # Start training
+python scripts/train.py --data your_dataset.yaml --weights yolov5s.pt --img 640 # Start training
 
 # Validate the trained model's performance (Precision, Recall, mAP)
 python val.py --weights path/to/your/best.pt --data your_dataset.yaml # Validate accuracy
@@ -138,3 +138,4 @@ Learn more about evaluation metrics like [Precision](https://www.ultralytics.com
 <p align="center"><img width="1000" src="https://github.com/ultralytics/docs/releases/download/0/gcp-running-docker.avif" alt="Running YOLOv5 inside a Docker container on GCP"></p>
 
 Congratulations! You have successfully set up and run YOLOv5 within a Docker container.
+

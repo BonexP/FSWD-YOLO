@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn to freeze YOLOv5 layers for efficient transfer learning, reducing resources and speeding up training while maintaining accuracy.
 keywords: YOLOv5, transfer learning, freeze layers, machine learning, deep learning, model training, PyTorch, Ultralytics
@@ -92,7 +92,7 @@ You can control which layers are frozen using the `--freeze` argument in the tra
 To freeze the entire backbone (layers 0 through 9), which is common when adapting the model to new object classes while retaining general feature extraction capabilities learned from a large dataset like [COCO](https://docs.ultralytics.com/datasets/detect/coco/):
 
 ```bash
-python train.py --weights yolov5m.pt --data your_dataset.yaml --freeze 10
+python scripts/train.py --weights yolov5m.pt --data your_dataset.yaml --freeze 10
 ```
 
 This strategy is effective when your target dataset shares similar low-level visual features (edges, textures) with the original training data (e.g., COCO) but contains different object categories.
@@ -102,7 +102,7 @@ This strategy is effective when your target dataset shares similar low-level vis
 To freeze almost the entire network, leaving only the final output convolution layers (part of the `Detect` module, typically the last module, e.g., module 24 in YOLOv5s) trainable:
 
 ```bash
-python train.py --weights yolov5m.pt --data your_dataset.yaml --freeze 24
+python scripts/train.py --weights yolov5m.pt --data your_dataset.yaml --freeze 24
 ```
 
 This approach is useful when you primarily need to adjust the model for a different number of output classes while keeping the vast majority of learned features intact. It requires the least computational resources for [fine-tuning](https://www.ultralytics.com/glossary/fine-tuning).
@@ -113,7 +113,7 @@ To illustrate the effects of freezing layers, we trained YOLOv5m on the [Pascal 
 
 ```bash
 # Example command for training with backbone frozen
-python train.py --batch 48 --weights yolov5m.pt --data voc.yaml --epochs 50 --cache --img 512 --hyp hyp.finetune.yaml --freeze 10
+python scripts/train.py --batch 48 --weights yolov5m.pt --data voc.yaml --epochs 50 --cache --img 512 --hyp hyp.finetune.yaml --freeze 10
 ```
 
 ### Accuracy Results
@@ -165,3 +165,4 @@ Ultralytics offers various ready-to-use environments with essential dependencies
 <a href="https://github.com/ultralytics/yolov5/actions/workflows/ci-testing.yml"><img src="https://github.com/ultralytics/yolov5/actions/workflows/ci-testing.yml/badge.svg" alt="YOLOv5 Continuous Integration Status"></a>
 
 This badge confirms that all [YOLOv5 GitHub Actions](https://github.com/ultralytics/yolov5/actions) Continuous Integration (CI) tests are passing successfully. These CI tests rigorously evaluate the functionality and performance of YOLOv5 across key operations: [training](https://github.com/ultralytics/yolov5/blob/master/train.py), [validation](https://github.com/ultralytics/yolov5/blob/master/val.py), [inference](https://github.com/ultralytics/yolov5/blob/master/detect.py), [export](https://github.com/ultralytics/yolov5/blob/master/export.py), and [benchmarks](https://github.com/ultralytics/yolov5/blob/master/benchmarks.py). They ensure consistent and reliable operation on macOS, Windows, and Ubuntu, running automatically every 24 hours and on each new code commit.
+

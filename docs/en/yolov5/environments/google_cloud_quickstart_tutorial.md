@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Master Ultralytics YOLOv5 deployment on Google Cloud Platform Deep Learning VM. Perfect for AI beginners and experts to achieve high-performance object detection.
 keywords: YOLOv5, Google Cloud Platform, GCP, Deep Learning VM, object detection, AI, machine learning, tutorial, cloud computing, GPU acceleration, Ultralytics
@@ -50,7 +50,7 @@ With the setup complete, you are ready to [train](../../modes/train.md), [valida
 
 ```bash
 # Train a YOLOv5 model on your dataset (e.g., yolov5s)
-python train.py --data coco128.yaml --weights yolov5s.pt --img 640
+python scripts/train.py --data coco128.yaml --weights yolov5s.pt --img 640
 
 # Validate the trained model to check Precision, Recall, and mAP
 python val.py --weights yolov5s.pt --data coco128.yaml
@@ -98,7 +98,7 @@ To train YOLOv5 on your custom dataset within GCP, follow these general steps:
 
     ```bash
     # Example: Train YOLOv5s on a custom dataset for 100 epochs
-    python train.py --img 640 --batch 16 --epochs 100 --data custom_dataset.yaml --weights yolov5s.pt
+    python scripts/train.py --img 640 --batch 16 --epochs 100 --data custom_dataset.yaml --weights yolov5s.pt
     ```
 
 For comprehensive instructions on preparing data and training with custom datasets, consult the [Ultralytics YOLOv5 Train documentation](../../modes/train.md).
@@ -130,3 +130,4 @@ Consider using [Ultralytics HUB](../../hub/index.md) for a streamlined, no-code 
 Remember to document your progress, share insights with the vibrant Ultralytics community, and utilize resources like [GitHub discussions](https://github.com/ultralytics/yolov5/discussions) for collaboration and support. Now, go forth and innovate with YOLOv5 and GCP!
 
 Want to continue enhancing your ML skills? Dive into our [documentation](../../quickstart.md) and explore the [Ultralytics Blog](https://www.ultralytics.com/blog) for more tutorials and insights. Let your AI adventure continue!
+

@@ -1,4 +1,4 @@
----
+﻿---
 comments: true
 description: Learn how to set up and run Ultralytics YOLOv5 on AzureML. Follow this quickstart guide for easy configuration and model training on an AzureML compute instance.
 keywords: YOLOv5, AzureML, machine learning, compute instance, quickstart, model training, virtual environment, Python, AI, deep learning, Ultralytics
@@ -85,7 +85,7 @@ With the setup complete, you can now train, validate, perform inference, and exp
 
     ```bash
     # Start training using yolov5s pretrained weights on the COCO128 dataset
-    python train.py --data coco128.yaml --weights yolov5s.pt --img 640 --epochs 10 --batch 16
+    python scripts/train.py --data coco128.yaml --weights yolov5s.pt --img 640 --epochs 10 --batch 16
     ```
 
 - **Validate** the trained model's performance using metrics like [Precision](https://www.ultralytics.com/glossary/precision), [Recall](https://www.ultralytics.com/glossary/recall), and [mAP](https://www.ultralytics.com/glossary/mean-average-precision-map). See the [Validation Mode](../../modes/val.md) guide for options.
@@ -145,3 +145,4 @@ After creating the kernel, refresh your browser. When you open or create a `.ipy
     ```
 
 Congratulations! You've successfully set up and run Ultralytics YOLOv5 on AzureML. For further exploration, consider checking out other [Ultralytics Integrations](../../integrations/index.md) or the detailed [YOLOv5 documentation](../index.md). You might also find the [AzureML documentation](https://learn.microsoft.com/en-us/azure/machine-learning/?view=azureml-api-2) useful for advanced scenarios like distributed training or model deployment as an endpoint.
+
