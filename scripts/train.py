@@ -53,6 +53,7 @@ def parse_args():
 
     parser.add_argument('--project', type=str, default='runs/train', help='结果保存目录')
     parser.add_argument('--name', type=str, default='baseline_yolo11', help='实验名')
+    parser.add_argument('--seed', type=int, default=0, help='训练随机种子')
     # 新增：是否启用加权 DataLoader
     parser.add_argument('--weighted-dataloader', action='store_true',
                         help='启用加权 YOLOWeightedDataset 以缓解类别不平衡')
@@ -122,6 +123,7 @@ if __name__ == '__main__':
         optimizer=args.optimizer,
         project=args.project,
         name=args.name,
+        seed=args.seed,
         exist_ok=True,
         iou_type=args.iou_type,  # 添加 IoU 类型参数
         **augment_config,
