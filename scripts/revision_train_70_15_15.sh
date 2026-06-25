@@ -6,6 +6,8 @@
 #
 # Common overrides:
 #   TASK_SET=main SEEDS="0 1 2" DEVICE=0 bash scripts/revision_train_70_15_15.sh
+#   TASK_SET=workset SEEDS="0 1 2 3 4" DEVICE=0 bash scripts/revision_train_70_15_15.sh
+#   TASK_SET=cherry-pick SEEDS="0 1 2" DEVICE=0 bash scripts/revision_train_70_15_15.sh
 #   TASK_SET=ablation SEEDS=0 bash scripts/revision_train_70_15_15.sh
 #   DRY_RUN=1 bash scripts/revision_train_70_15_15.sh
 
@@ -47,10 +49,10 @@ if [[ ! -f "${DATA}" ]]; then
 fi
 
 case "${TASK_SET}" in
-    main|ablation|all)
+    main|workset|cherry-pick|ablation|all)
         ;;
     *)
-        echo "ERROR: TASK_SET must be one of: main, ablation, all." >&2
+        echo "ERROR: TASK_SET must be one of: main, workset, cherry-pick, ablation, all." >&2
         exit 1
         ;;
 esac
@@ -133,6 +135,18 @@ add_main_tasks_for_seed() {
     add_task "main_fswd_yolo" "ultralytics/cfg/models/11/fswd-yolo.yaml" "${seed}" "ShapeIoU" "1"
 }
 
+add_workset_tasks_for_seed() {
+    local seed="$1"
+    add_task "main_yolov8s" "ultralytics/cfg/models/v8/yolov8s.yaml" "${seed}" "CIoU" "1"
+    add_task "main_yolov9s" "ultralytics/cfg/models/v9/yolov9s.yaml" "${seed}" "CIoU" "1"
+    add_task "main_fswd_yolo" "ultralytics/cfg/models/11/fswd-yolo.yaml" "${seed}" "ShapeIoU" "1"
+}
+
+add_cherry_pick_tasks_for_seed() {
+    local seed="$1"
+    add_workset_tasks_for_seed "${seed}"
+}
+
 add_ablation_tasks_for_seed() {
     local seed="$1"
     add_task "abl_ghost_fca_ciou" \
@@ -158,6 +172,12 @@ add_ablation_tasks_for_seed() {
 for seed in ${SEEDS}; do
     if [[ "${TASK_SET}" == "main" || "${TASK_SET}" == "all" ]]; then
         add_main_tasks_for_seed "${seed}"
+    fi
+    if [[ "${TASK_SET}" == "workset" ]]; then
+        add_workset_tasks_for_seed "${seed}"
+    fi
+    if [[ "${TASK_SET}" == "cherry-pick" ]]; then
+        add_cherry_pick_tasks_for_seed "${seed}"
     fi
     if [[ "${TASK_SET}" == "ablation" || "${TASK_SET}" == "all" ]]; then
         add_ablation_tasks_for_seed "${seed}"
