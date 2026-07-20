@@ -8,7 +8,7 @@ import os
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 try:
     from scripts import fswd_deploy_common as common
@@ -146,7 +146,7 @@ def run(args: argparse.Namespace) -> int:
         raise
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)

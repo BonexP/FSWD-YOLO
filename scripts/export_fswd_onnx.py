@@ -10,7 +10,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 try:
     from scripts import fswd_deploy_common as common
@@ -65,7 +65,7 @@ def report_path(output: Path) -> Path:
     return output.with_name(f"{output.name}.report.json")
 
 
-def _numeric_version(version: str) -> tuple[int, int, int]:
+def _numeric_version(version: str) -> Tuple[int, int, int]:
     match = re.match(r"^\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?", version)
     if match is None:
         raise common.DependencyError(
@@ -192,7 +192,7 @@ def _serialize_arguments(args: argparse.Namespace) -> Dict[str, Any]:
 def _move_exported_artifact(source: Path, destination: Path) -> None:
     if source.resolve() == destination.resolve():
         return
-    temporary_path: Path | None = None
+    temporary_path: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(
             dir=destination.parent,
@@ -241,12 +241,13 @@ def run(args: argparse.Namespace) -> int:
     if generated_default.resolve() != output.resolve():
         common.prepare_output(generated_default, args.overwrite)
 
-    common.require_modules(export_requirements(args.verify_runtime), "FSWD-YOLO ONNX export")
     payload = _base_report(args, weights)
 
     # Ultralytics reads this at import time. The deployment tools never install packages.
     os.environ["YOLO_AUTOINSTALL"] = "false"
     try:
+        common.require_modules(export_requirements(args.verify_runtime), "FSWD-YOLO ONNX export")
+
         import onnx
         from ultralytics import YOLO
 
@@ -285,7 +286,7 @@ def run(args: argparse.Namespace) -> int:
         raise
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -154,6 +155,29 @@ class ExportCliTests(unittest.TestCase):
     def test_normalize_torch_prediction_rejects_unknown_structure(self):
         with self.assertRaisesRegex(TypeError, "prediction tensor"):
             export_cli.normalize_torch_prediction({"unexpected": "output"})
+
+    def test_dependency_failure_writes_failure_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "best.pt"
+            output = root / "model.onnx"
+            weights.write_bytes(b"checkpoint")
+            args = export_cli.build_parser().parse_args(
+                ["--weights", str(weights), "--output", str(output)]
+            )
+
+            with mock.patch.object(
+                export_cli.common,
+                "require_modules",
+                side_effect=common.DependencyError("missing test dependency"),
+            ):
+                with self.assertRaisesRegex(common.DependencyError, "missing test dependency"):
+                    export_cli.run(args)
+
+            payload = json.loads(export_cli.report_path(output).read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "failed")
+            self.assertEqual(payload["error"]["type"], "DependencyError")
+            self.assertFalse(output.exists())
 
 
 class InspectorCliTests(unittest.TestCase):
