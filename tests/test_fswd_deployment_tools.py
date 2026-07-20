@@ -1,6 +1,7 @@
 # Ultralytics AGPL-3.0 License - https://ultralytics.com/license
 
 import hashlib
+import importlib.util
 import json
 import sys
 import tempfile
@@ -181,6 +182,26 @@ class InspectorCliTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileExistsError, "--overwrite"):
                 inspect_cli.prepare_manifest(Path(directory), overwrite=False)
+
+
+@unittest.skipUnless(importlib.util.find_spec("onnx"), "onnx is not installed")
+class OnnxIntegrationTests(unittest.TestCase):
+    def test_graph_report_reads_real_onnx_nodes(self):
+        import onnx
+        from onnx import TensorProto, helper
+
+        graph = helper.make_graph(
+            [helper.make_node("Div", ["input", "scale"], ["output"])],
+            "fswd_test_graph",
+            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 1])],
+            [helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, 1])],
+            [helper.make_tensor("scale", TensorProto.FLOAT, [1], [2.0])],
+        )
+
+        report = export_cli.onnx_graph_report(helper.make_model(graph), onnx)
+
+        self.assertEqual(report["inputs"][0]["shape"], [1, 1])
+        self.assertEqual(report["operators"]["review_operations"], {"Div": 1})
 
 
 if __name__ == "__main__":

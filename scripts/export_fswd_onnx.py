@@ -127,8 +127,7 @@ def _value_info(value: Any, onnx: Any) -> Dict[str, Any]:
     }
 
 
-def inspect_onnx_graph(model: Any, onnx: Any) -> Dict[str, Any]:
-    operators = common.summarize_operators(node.op_type for node in model.graph.node)
+def onnx_graph_report(model: Any, onnx: Any) -> Dict[str, Any]:
     return {
         "ir_version": model.ir_version,
         "opset_imports": [
@@ -138,7 +137,7 @@ def inspect_onnx_graph(model: Any, onnx: Any) -> Dict[str, Any]:
         "inputs": [_value_info(value, onnx) for value in model.graph.input],
         "outputs": [_value_info(value, onnx) for value in model.graph.output],
         "node_count": len(model.graph.node),
-        **operators,
+        "operators": common.summarize_operators(node.op_type for node in model.graph.node),
     }
 
 
@@ -260,7 +259,7 @@ def run(args: argparse.Namespace) -> int:
 
         model = onnx.load(str(output))
         onnx.checker.check_model(model)
-        payload["onnx"] = inspect_onnx_graph(model, onnx)
+        payload["onnx"] = onnx_graph_report(model, onnx)
         payload["output"] = {"path": str(output), "sha256": common.sha256_file(output)}
 
         if args.verify_runtime:
