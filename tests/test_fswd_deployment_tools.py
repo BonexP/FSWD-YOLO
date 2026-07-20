@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts import fswd_deploy_common as common  # noqa: E402
 from scripts import export_fswd_onnx as export_cli  # noqa: E402
+from scripts import inspect_fswd_vitis as inspect_cli  # noqa: E402
 
 
 class CommonUtilitiesTests(unittest.TestCase):
@@ -152,6 +153,34 @@ class ExportCliTests(unittest.TestCase):
     def test_normalize_torch_prediction_rejects_unknown_structure(self):
         with self.assertRaisesRegex(TypeError, "prediction tensor"):
             export_cli.normalize_torch_prediction({"unexpected": "output"})
+
+
+class InspectorCliTests(unittest.TestCase):
+    def test_target_is_required(self):
+        parser = inspect_cli.build_parser()
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--weights", "best.pt", "--output-dir", "inspect"])
+
+    def test_inspector_defaults_are_fixed_cpu_inputs(self):
+        parser = inspect_cli.build_parser()
+
+        args = parser.parse_args(
+            ["--weights", "best.pt", "--target", "TARGET", "--output-dir", "inspect"]
+        )
+
+        self.assertEqual(args.imgsz, 640)
+        self.assertEqual(args.verbose_level, 2)
+        self.assertEqual(args.image_format, "svg")
+        self.assertFalse(args.overwrite)
+
+    def test_existing_manifest_requires_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "inspection_manifest.json"
+            manifest.write_text("{}", encoding="utf-8")
+
+            with self.assertRaisesRegex(FileExistsError, "--overwrite"):
+                inspect_cli.prepare_manifest(Path(directory), overwrite=False)
 
 
 if __name__ == "__main__":
