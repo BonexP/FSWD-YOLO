@@ -18,6 +18,7 @@ except ImportError:  # Direct execution: python scripts/export_fswd_onnx.py
     import fswd_deploy_common as common
 
 
+REPO_ROOT = common.add_repo_root_to_path(Path(__file__))
 SUPPORTED_ONNX = "onnx>=1.12.0,<1.18.0"
 
 
@@ -210,14 +211,13 @@ def _move_exported_artifact(source: Path, destination: Path) -> None:
 
 
 def _base_report(args: argparse.Namespace, weights: Path) -> Dict[str, Any]:
-    repo_root = Path(__file__).resolve().parents[1]
     return {
         "tool": "export_fswd_onnx",
         "status": "running",
         "timestamp_utc": common.utc_now(),
         "arguments": _serialize_arguments(args),
         "input": {"path": str(weights), "sha256": common.sha256_file(weights)},
-        "git": common.git_metadata(repo_root),
+        "git": common.git_metadata(REPO_ROOT),
         "packages": common.package_versions(
             ["torch", "onnx", "onnxruntime", "ultralytics", "numpy"]
         ),
@@ -249,6 +249,9 @@ def run(args: argparse.Namespace) -> int:
         common.require_modules(export_requirements(args.verify_runtime), "FSWD-YOLO ONNX export")
 
         import onnx
+        import torch
+
+        common.normalize_version_attribute(torch)
         from ultralytics import YOLO
 
         validate_onnx_version(onnx.__version__)

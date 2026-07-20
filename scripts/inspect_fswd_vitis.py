@@ -16,6 +16,9 @@ except ImportError:  # Direct execution: python scripts/inspect_fswd_vitis.py
     import fswd_deploy_common as common
 
 
+REPO_ROOT = common.add_repo_root_to_path(Path(__file__))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Inspect an FSWD-YOLO PyTorch graph for an explicit Vitis AI target."
@@ -74,7 +77,6 @@ def _serialize_arguments(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _base_manifest(args: argparse.Namespace, weights: Path, output_dir: Path) -> Dict[str, Any]:
-    repo_root = Path(__file__).resolve().parents[1]
     return {
         "tool": "inspect_fswd_vitis",
         "status": "running",
@@ -89,7 +91,7 @@ def _base_manifest(args: argparse.Namespace, weights: Path, output_dir: Path) ->
             "device": "cpu",
         },
         "output_dir": str(output_dir),
-        "git": common.git_metadata(repo_root),
+        "git": common.git_metadata(REPO_ROOT),
         "runtime": {
             "python": sys.version,
             "python_executable": sys.executable,
@@ -117,6 +119,8 @@ def run(args: argparse.Namespace) -> int:
         common.require_modules(inspector_requirements(), "FSWD-YOLO Vitis AI inspection")
 
         import torch
+
+        common.normalize_version_attribute(torch)
         from pytorch_nndct.apis import Inspector
         from ultralytics import YOLO
 

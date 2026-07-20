@@ -23,9 +23,11 @@ Vitis AI 主机: best.pt + target -> inspect_fswd_vitis.py -> Inspector 结果 +
 从仓库根目录先确认解释器和依赖。下面的命令不会安装任何内容：
 
 ```bash
-python -c "import sys, torch, onnx, ultralytics; print(sys.executable); print(torch.__version__, onnx.__version__)"
+python -c "import sys, torch, onnx; print(sys.executable); print(torch.__version__, onnx.__version__)"
 python scripts/export_fswd_onnx.py --help
 ```
+
+`pip show ultralytics` 可能显示未安装，这是源码检出模式下的正常现象。部署脚本会把仓库根目录加入 Python 搜索路径，直接使用当前仓库的 `ultralytics/`。它还会在导入 Ultralytics 前把 PyTorch 1.10 的不可哈希 `TorchVersion` 规范化为普通版本字符串，避免版本检查缓存报 `TypeError: unhashable type: 'TorchVersion'`。
 
 执行固定 batch 1、FP32、静态输入、无 NMS、无 simplify 的 ONNX 导出：
 

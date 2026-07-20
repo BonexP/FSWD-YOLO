@@ -3,10 +3,12 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -20,6 +22,35 @@ from scripts import inspect_fswd_vitis as inspect_cli  # noqa: E402
 
 
 class CommonUtilitiesTests(unittest.TestCase):
+    def test_add_repo_root_to_path_exposes_sibling_source_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            script = repo_root / "scripts" / "tool.py"
+            package = repo_root / "local_fswd_package"
+            script.parent.mkdir()
+            script.write_text("", encoding="utf-8")
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+
+            inserted = common.add_repo_root_to_path(script)
+            try:
+                self.assertEqual(inserted, repo_root.resolve())
+                self.assertIsNotNone(importlib.util.find_spec("local_fswd_package"))
+            finally:
+                sys.path.remove(str(repo_root.resolve()))
+
+    def test_normalize_version_attribute_makes_torch_version_hashable(self):
+        class UnhashableVersion(str):
+            __hash__ = None
+
+        module = SimpleNamespace(__version__=UnhashableVersion("1.10.0+cpu"))
+
+        normalized = common.normalize_version_attribute(module)
+
+        self.assertEqual(normalized, "1.10.0+cpu")
+        self.assertEqual(type(module.__version__), str)
+        self.assertEqual(hash(module.__version__), hash("1.10.0+cpu"))
+
     def test_validate_weights_requires_existing_pt_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "weights.bin"
@@ -94,6 +125,33 @@ class CommonUtilitiesTests(unittest.TestCase):
 
 
 class ExportCliTests(unittest.TestCase):
+    def test_direct_script_discovers_repository_ultralytics_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "best.pt"
+            output = root / "model.onnx"
+            weights.write_bytes(b"checkpoint")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    str(REPO_ROOT / "scripts" / "export_fswd_onnx.py"),
+                    "--weights",
+                    str(weights),
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("  - torch:", result.stderr)
+            self.assertIn("  - onnx:", result.stderr)
+            self.assertNotIn("  - ultralytics:", result.stderr)
+
     def test_export_defaults_are_fpga_review_friendly(self):
         parser = export_cli.build_parser()
 

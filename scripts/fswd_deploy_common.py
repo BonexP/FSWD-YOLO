@@ -26,6 +26,22 @@ class DependencyError(RuntimeError):
     """Raised when a deployment operation is missing an explicit dependency."""
 
 
+def add_repo_root_to_path(script_file: Path) -> Path:
+    """Expose source packages beside scripts/ during direct script execution."""
+    repo_root = Path(script_file).resolve().parents[1]
+    repo_root_text = str(repo_root)
+    if repo_root_text not in sys.path:
+        sys.path.insert(0, repo_root_text)
+    return repo_root
+
+
+def normalize_version_attribute(module: Any, attribute: str = "__version__") -> str:
+    """Replace version-like string subclasses with a hashable plain string."""
+    normalized = str(getattr(module, attribute))
+    setattr(module, attribute, normalized)
+    return normalized
+
+
 def require_modules(requirements: Mapping[str, str], operation: str) -> Dict[str, str]:
     """Verify Python modules without installing or importing them."""
     found: Dict[str, str] = {}
