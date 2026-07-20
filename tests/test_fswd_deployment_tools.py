@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import fswd_deploy_common as common  # noqa: E402
+from scripts import export_fswd_onnx as export_cli  # noqa: E402
 
 
 class CommonUtilitiesTests(unittest.TestCase):
@@ -87,6 +88,70 @@ class CommonUtilitiesTests(unittest.TestCase):
         self.assertIn("manual installation only", message)
         self.assertIn(sys.executable, message)
         self.assertIn("does not install packages", message)
+
+
+class ExportCliTests(unittest.TestCase):
+    def test_export_defaults_are_fpga_review_friendly(self):
+        parser = export_cli.build_parser()
+
+        args = parser.parse_args(["--weights", "best.pt", "--output", "fswd.onnx"])
+
+        self.assertEqual(args.imgsz, 640)
+        self.assertEqual(args.opset, 13)
+        self.assertEqual(args.seed, 0)
+        self.assertEqual(args.rtol, 1e-4)
+        self.assertEqual(args.atol, 1e-5)
+        self.assertFalse(args.verify_runtime)
+        self.assertFalse(args.overwrite)
+
+    def test_export_requirements_add_onnxruntime_only_for_parity(self):
+        base = export_cli.export_requirements(False)
+        parity = export_cli.export_requirements(True)
+
+        self.assertEqual(set(base), {"torch", "onnx", "ultralytics"})
+        self.assertNotIn("onnxruntime", base)
+        self.assertIn("onnxruntime", parity)
+
+    def test_report_path_appends_report_json(self):
+        self.assertEqual(export_cli.report_path(Path("model.onnx")), Path("model.onnx.report.json"))
+
+    def test_onnx_version_must_match_ultralytics_export_range(self):
+        export_cli.validate_onnx_version("1.14.0")
+        with self.assertRaisesRegex(common.DependencyError, "onnx>=1.12.0,<1.18.0"):
+            export_cli.validate_onnx_version("1.18.0")
+
+    def test_export_kwargs_disable_dynamic_nms_and_simplification(self):
+        kwargs = export_cli.export_kwargs(imgsz=640, opset=13)
+
+        self.assertEqual(
+            kwargs,
+            {
+                "format": "onnx",
+                "imgsz": 640,
+                "batch": 1,
+                "dynamic": False,
+                "nms": False,
+                "simplify": False,
+                "half": False,
+                "opset": 13,
+                "device": "cpu",
+            },
+        )
+
+    def test_normalize_torch_prediction_uses_first_tensor_like_value(self):
+        class TensorLike:
+            shape = (1, 10, 8400)
+
+            def detach(self):
+                return self
+
+        tensor = TensorLike()
+
+        self.assertIs(export_cli.normalize_torch_prediction((tensor, ["features"])), tensor)
+
+    def test_normalize_torch_prediction_rejects_unknown_structure(self):
+        with self.assertRaisesRegex(TypeError, "prediction tensor"):
+            export_cli.normalize_torch_prediction({"unexpected": "output"})
 
 
 if __name__ == "__main__":

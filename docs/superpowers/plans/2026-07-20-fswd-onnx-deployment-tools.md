@@ -137,7 +137,7 @@ Implement these public interfaces with consistent signatures: `build_parser() ->
 
 1. Validate `.pt` input and `.onnx` output before framework imports.
 2. Preflight `torch`, `onnx`, `ultralytics`, and optional `onnxruntime`.
-3. Set `ULTRALYTICS_AUTOINSTALL=False` before importing Ultralytics.
+3. Set `YOLO_AUTOINSTALL=false` before importing Ultralytics.
 4. Load `YOLO(weights)` and call `export(format="onnx", imgsz=args.imgsz, batch=1, dynamic=False, nms=False, simplify=False, half=False, opset=args.opset, device="cpu")`.
 5. Move the generated file to `--output` only after export succeeds.
 6. Run `onnx.checker.check_model`, collect graph metadata and operator summaries, and atomically write `<output>.report.json`.
@@ -214,7 +214,7 @@ Expected: import failure because `scripts.inspect_fswd_vitis` does not exist.
 
 Implement these public interfaces with consistent signatures: `build_parser() -> argparse.ArgumentParser`, `inspector_requirements() -> Dict[str, str]`, `prepare_manifest(output_dir: Path, overwrite: bool) -> Path`, `run(args: argparse.Namespace) -> int`, and `main() -> int`.
 
-`run` validates the checkpoint, preflights `torch`, `ultralytics`, and `pytorch_nndct`, sets `ULTRALYTICS_AUTOINSTALL=False`, loads `YOLO(weights).model.float().eval().cpu()`, creates `torch.randn(1, 3, imgsz, imgsz)`, and calls:
+`run` validates the checkpoint, preflights `torch`, `ultralytics`, and `pytorch_nndct`, sets `YOLO_AUTOINSTALL=false`, loads `YOLO(weights).model.float().eval().cpu()`, creates `torch.randn(1, 3, imgsz, imgsz)`, and calls:
 
 ```python
 Inspector(args.target).inspect(
