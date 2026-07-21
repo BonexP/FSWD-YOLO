@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import os
 import platform
 import sys
@@ -17,6 +18,46 @@ except ImportError:  # Direct execution: python scripts/inspect_fswd_vitis.py
 
 
 REPO_ROOT = common.add_repo_root_to_path(Path(__file__))
+
+
+def install_vitis_35_permute_report_compatibility(
+    inspector_impl_class: Any, permute_op: Any
+) -> bool:
+    """Prevent Vitis AI 3.5 Inspector reports from crashing on 3D permutes."""
+    original = inspector_impl_class._attach_extra_node_msg
+    try:
+        source = inspect.getsource(original)
+    except (OSError, TypeError):
+        return False
+    if "transpose_order_to_msg[tuple(order)]" not in source:
+        return False
+
+    transpose_order_to_msg = {
+        (0, 3, 1, 2): "from 'NHWC' to 'NCHW'",
+        (0, 2, 3, 1): "from 'NCHW' to 'NHWC'",
+        (0, 4, 3, 1, 2): "from 'NHWDC' to 'NCDHW'",
+        (0, 3, 4, 2, 1): "from 'NCDHW' to 'NHWDC'",
+    }
+
+    def attach_extra_node_msg_compat(instance: Any, graph: Any) -> None:
+        for node in graph.nodes:
+            is_inserted_permute = node.op.type == permute_op and any(
+                marker in node.name for marker in ("swim_transpose", "sink_transpose")
+            )
+            if not is_inserted_permute:
+                continue
+            order = tuple(node.node_attr(node.op.AttrName.ORDER))
+            layout_message = transpose_order_to_msg.get(order)
+            if layout_message is None:
+                conversion = f"using permutation order {order}"
+            else:
+                conversion = f"to convert data layout {layout_message}"
+            instance._node_msgs[node].add(
+                f"quantizer insert this permute operation {conversion} for deployment."
+            )
+
+    inspector_impl_class._attach_extra_node_msg = attach_extra_node_msg_compat
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,8 +162,18 @@ def run(args: argparse.Namespace) -> int:
         import torch
 
         common.normalize_version_attribute(torch)
+        from nndct_shared.base import NNDCT_OP
         from pytorch_nndct.apis import Inspector
+        from pytorch_nndct.hardware_v3.inspector import InspectorImpl
         from ultralytics import YOLO
+
+        compatibility_applied = install_vitis_35_permute_report_compatibility(
+            InspectorImpl, NNDCT_OP.PERMUTE
+        )
+        payload["compatibility"] = {
+            "vitis_35_permute_report_patch_applied": compatibility_applied,
+            "scope": "Inspector report messages only",
+        }
 
         torch.manual_seed(args.seed)
         model = YOLO(str(weights)).model.float().eval().cpu()

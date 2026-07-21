@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -239,6 +240,58 @@ class ExportCliTests(unittest.TestCase):
 
 
 class InspectorCliTests(unittest.TestCase):
+    def test_vitis_35_compatibility_reports_unknown_3d_permute(self):
+        class FakeOp:
+            type = "permute"
+
+            class AttrName:
+                ORDER = "order"
+
+        class FakeNode:
+            name = "model::swim_transpose_0"
+            op = FakeOp()
+
+            @staticmethod
+            def node_attr(_name):
+                return [0, 2, 1]
+
+        class BuggyInspectorImpl:
+            def __init__(self):
+                self._node_msgs = defaultdict(set)
+
+            def _attach_extra_node_msg(self, graph):
+                transpose_order_to_msg = {}
+                node = graph.nodes[0]
+                order = node.node_attr(node.op.AttrName.ORDER)
+                self._node_msgs[node].add(transpose_order_to_msg[tuple(order)])
+
+        node = FakeNode()
+        graph = SimpleNamespace(nodes=[node])
+
+        applied = inspect_cli.install_vitis_35_permute_report_compatibility(
+            BuggyInspectorImpl, "permute"
+        )
+        inspector = BuggyInspectorImpl()
+        inspector._attach_extra_node_msg(graph)
+
+        self.assertTrue(applied)
+        self.assertIn("permutation order (0, 2, 1)", next(iter(inspector._node_msgs[node])))
+
+    def test_vitis_35_compatibility_leaves_fixed_implementation_unchanged(self):
+        class FixedInspectorImpl:
+            def _attach_extra_node_msg(self, _graph):
+                transpose_order_to_msg = {}
+                return transpose_order_to_msg.get((0, 2, 1), "already safe")
+
+        original = FixedInspectorImpl._attach_extra_node_msg
+
+        applied = inspect_cli.install_vitis_35_permute_report_compatibility(
+            FixedInspectorImpl, "permute"
+        )
+
+        self.assertFalse(applied)
+        self.assertIs(FixedInspectorImpl._attach_extra_node_msg, original)
+
     def test_target_is_required(self):
         parser = inspect_cli.build_parser()
 

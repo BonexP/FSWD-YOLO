@@ -81,6 +81,8 @@ python scripts/inspect_fswd_vitis.py \
 
 默认输入为 `[1, 3, 640, 640]` 的 CPU FP32 tensor，`--verbose-level` 默认为 `2`，图像格式默认为 SVG。结果目录内会生成 `inspection_manifest.json`，记录 checkpoint 哈希、target、输入形状、Git/运行时信息及成功或失败详情。已有 manifest 需要 `--overwrite`。
 
+Vitis AI 3.5 的 Inspector 报告代码没有为 3D permute `(0, 2, 1)` 提供布局说明，可能在编译完成后以 `KeyError: (0, 2, 1)` 退出。包装器仅在检测到该版本的危险直接索引实现时安装报告层兼容方法：已知布局保留原说明，未知布局记录原始 permutation order。manifest 的 `compatibility.vitis_35_permute_report_patch_applied` 会说明本次是否应用补丁。该兼容处理不改变模型图、DPU 分区或编译结果。
+
 ## Vitis 环境依赖原则
 
 不要在 Vitis AI 环境中使用 `conda install timm` 或 `conda install onnx`。Conda 求解可能替换 AMD 容器预装的 PyTorch/NNDCT 组合，使 `pytorch_nndct` 再次不可导入。
