@@ -18,6 +18,67 @@ except ImportError:  # Direct execution: python scripts/inspect_fswd_vitis.py
 
 
 REPO_ROOT = common.add_repo_root_to_path(Path(__file__))
+MODEL_PREPARATION_RTOL = 1e-5
+MODEL_PREPARATION_ATOL = 1e-6
+
+
+class ModelPreparationError(RuntimeError):
+    """Raised when a Vitis graph preparation changes model predictions."""
+
+
+def prepare_model_for_vitis_inspection(
+    model: Any, silu_class: Any, c2f_class: Any
+) -> Dict[str, int]:
+    """Apply semantics-preserving graph forms preferred by Vitis AI Inspector."""
+    changes = {"silu_inplace_disabled": 0, "c2f_forward_split_enabled": 0}
+    for module in model.modules():
+        if isinstance(module, silu_class) and getattr(module, "inplace", False):
+            module.inplace = False
+            changes["silu_inplace_disabled"] += 1
+
+        if isinstance(module, c2f_class) and callable(getattr(module, "forward_split", None)):
+            current_function = getattr(module.forward, "__func__", module.forward)
+            split_function = getattr(module.forward_split, "__func__", module.forward_split)
+            if current_function is not split_function:
+                module.forward = module.forward_split
+                changes["c2f_forward_split_enabled"] += 1
+    return changes
+
+
+def compare_prediction_tensors(
+    torch_module: Any,
+    before: Any,
+    after: Any,
+    rtol: float,
+    atol: float,
+) -> Dict[str, Any]:
+    """Compare raw predictions before and after Vitis graph preparation."""
+    before_shape = list(before.shape)
+    after_shape = list(after.shape)
+    shape_matches = before_shape == after_shape
+    if not shape_matches:
+        return {
+            "before_shape": before_shape,
+            "after_shape": after_shape,
+            "shape_matches": False,
+            "allclose": False,
+            "max_absolute_error": None,
+            "mean_absolute_error": None,
+            "rtol": rtol,
+            "atol": atol,
+        }
+
+    absolute_error = (before - after).abs()
+    return {
+        "before_shape": before_shape,
+        "after_shape": after_shape,
+        "shape_matches": True,
+        "allclose": bool(torch_module.allclose(before, after, rtol=rtol, atol=atol)),
+        "max_absolute_error": float(absolute_error.max().item()),
+        "mean_absolute_error": float(absolute_error.mean().item()),
+        "rtol": rtol,
+        "atol": atol,
+    }
 
 
 def install_vitis_35_permute_report_compatibility(
@@ -166,6 +227,8 @@ def run(args: argparse.Namespace) -> int:
         from pytorch_nndct.apis import Inspector
         from pytorch_nndct.hardware_v3.inspector import InspectorImpl
         from ultralytics import YOLO
+        from ultralytics.nn.modules import C2f
+        from scripts.export_fswd_onnx import normalize_torch_prediction
 
         compatibility_applied = install_vitis_35_permute_report_compatibility(
             InspectorImpl, NNDCT_OP.PERMUTE
@@ -175,9 +238,35 @@ def run(args: argparse.Namespace) -> int:
             "scope": "Inspector report messages only",
         }
 
-        torch.manual_seed(args.seed)
         model = YOLO(str(weights)).model.float().eval().cpu()
+        torch.manual_seed(args.seed)
         dummy = torch.randn(1, 3, args.imgsz, args.imgsz, dtype=torch.float32)
+        with torch.no_grad():
+            before_preparation = (
+                normalize_torch_prediction(model(dummy)).detach().cpu().clone()
+            )
+
+        preparation_changes = prepare_model_for_vitis_inspection(model, torch.nn.SiLU, C2f)
+        with torch.no_grad():
+            after_preparation = (
+                normalize_torch_prediction(model(dummy)).detach().cpu().clone()
+            )
+        preparation_parity = compare_prediction_tensors(
+            torch,
+            before_preparation,
+            after_preparation,
+            rtol=MODEL_PREPARATION_RTOL,
+            atol=MODEL_PREPARATION_ATOL,
+        )
+        payload["model_preparation"] = {
+            "changes": preparation_changes,
+            "prediction_parity": preparation_parity,
+        }
+        if not preparation_parity["allclose"]:
+            raise ModelPreparationError(
+                "Vitis graph preparation changed raw predictions; inspect model_preparation in the manifest."
+            )
+
         Inspector(args.target).inspect(
             model,
             (dummy,),
@@ -205,7 +294,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)
-    except (common.DependencyError, FileExistsError, FileNotFoundError, ValueError) as exc:
+    except (
+        common.DependencyError,
+        FileExistsError,
+        FileNotFoundError,
+        ModelPreparationError,
+        ValueError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

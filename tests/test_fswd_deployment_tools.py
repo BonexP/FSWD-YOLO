@@ -1,5 +1,6 @@
 # Ultralytics AGPL-3.0 License - https://ultralytics.com/license
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -240,6 +241,81 @@ class ExportCliTests(unittest.TestCase):
 
 
 class InspectorCliTests(unittest.TestCase):
+    def test_prediction_comparison_records_shape_and_error_metrics(self):
+        class FakeScalar:
+            def __init__(self, value):
+                self.value = value
+
+            def item(self):
+                return self.value
+
+        class FakeDifference:
+            def abs(self):
+                return self
+
+            def max(self):
+                return FakeScalar(0.0002)
+
+            def mean(self):
+                return FakeScalar(0.00001)
+
+        class FakeTensor:
+            shape = (1, 10, 8400)
+
+            def __sub__(self, _other):
+                return FakeDifference()
+
+        fake_torch = SimpleNamespace(allclose=lambda *_args, **_kwargs: True)
+
+        report = inspect_cli.compare_prediction_tensors(
+            fake_torch, FakeTensor(), FakeTensor(), rtol=1e-5, atol=1e-6
+        )
+
+        self.assertEqual(report["before_shape"], [1, 10, 8400])
+        self.assertEqual(report["after_shape"], [1, 10, 8400])
+        self.assertTrue(report["shape_matches"])
+        self.assertTrue(report["allclose"])
+        self.assertEqual(report["max_absolute_error"], 0.0002)
+        self.assertEqual(report["mean_absolute_error"], 0.00001)
+        self.assertEqual(report["rtol"], 1e-5)
+        self.assertEqual(report["atol"], 1e-6)
+
+    def test_model_preparation_disables_inplace_silu_and_uses_c2f_split(self):
+        class FakeSiLU:
+            def __init__(self, inplace):
+                self.inplace = inplace
+
+        class FakeC2f:
+            def forward(self, value):
+                return ("chunk", value)
+
+            def forward_split(self, value):
+                return ("split", value)
+
+        class Unrelated:
+            pass
+
+        inplace_silu = FakeSiLU(inplace=True)
+        safe_silu = FakeSiLU(inplace=False)
+        c2f = FakeC2f()
+        unrelated = Unrelated()
+        model = SimpleNamespace(modules=lambda: [model, inplace_silu, safe_silu, c2f, unrelated])
+
+        changes = inspect_cli.prepare_model_for_vitis_inspection(model, FakeSiLU, FakeC2f)
+
+        self.assertEqual(
+            changes,
+            {"silu_inplace_disabled": 1, "c2f_forward_split_enabled": 1},
+        )
+        self.assertFalse(inplace_silu.inplace)
+        self.assertFalse(safe_silu.inplace)
+        self.assertEqual(c2f.forward("input"), ("split", "input"))
+        self.assertFalse(hasattr(unrelated, "inplace"))
+
+        copied = copy.deepcopy(c2f)
+        self.assertIs(copied.forward.__self__, copied)
+        self.assertEqual(copied.forward("input"), ("split", "input"))
+
     def test_vitis_35_compatibility_reports_unknown_3d_permute(self):
         class FakeOp:
             type = "permute"

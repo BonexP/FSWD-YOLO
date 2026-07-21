@@ -83,6 +83,20 @@ python scripts/inspect_fswd_vitis.py \
 
 Vitis AI 3.5 的 Inspector 报告代码没有为 3D permute `(0, 2, 1)` 提供布局说明，可能在编译完成后以 `KeyError: (0, 2, 1)` 退出。包装器仅在检测到该版本的危险直接索引实现时安装报告层兼容方法：已知布局保留原说明，未知布局记录原始 permutation order。manifest 的 `compatibility.vitis_35_permute_report_patch_applied` 会说明本次是否应用补丁。该兼容处理不改变模型图、DPU 分区或编译结果。
 
+Inspector 包装器还会在内存模型上执行两项部署准备：把 `nn.SiLU.inplace` 设为 `False`，并让 `C2f` 派生模块使用 Ultralytics 已提供的 `forward_split()`。它不会修改 checkpoint 或训练模型定义。脚本使用同一个确定性输入比较准备前后的原始预测；shape 或 `torch.allclose(rtol=1e-5, atol=1e-6)` 不通过时会停止检查。manifest 的 `model_preparation` 会记录变换数量和最大/平均绝对误差。
+
+保留第一轮 Inspector 目录作为基线，第二轮使用新目录：
+
+```bash
+python scripts/inspect_fswd_vitis.py \
+  --weights /workspace/best.pt \
+  --target DPUCZDX8G_ISA1_B4096 \
+  --output-dir /workspace/inspect_fswd_b4096_prepared \
+  --overwrite
+```
+
+运行后比较两个 `inspect_*.txt` 中的 `aten::silu_`、`nndct_strided_slice`、CPU 算子列表，并对照控制台的 device subgraph 与 DPU subgraph 数量。只有实际减少 CPU 根算子或合并 DPU 子图，才能证明这些图变换改善了目标兼容性。
+
 ## Vitis 环境依赖原则
 
 不要在 Vitis AI 环境中使用 `conda install timm` 或 `conda install onnx`。Conda 求解可能替换 AMD 容器预装的 PyTorch/NNDCT 组合，使 `pytorch_nndct` 再次不可导入。
