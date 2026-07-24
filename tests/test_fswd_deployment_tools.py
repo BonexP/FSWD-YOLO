@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts import fswd_deploy_common as common  # noqa: E402
 from scripts import export_fswd_onnx as export_cli  # noqa: E402
 from scripts import inspect_fswd_vitis as inspect_cli  # noqa: E402
+from scripts import fswd_vitis_report as vitis_report  # noqa: E402
 
 
 class CommonUtilitiesTests(unittest.TestCase):
@@ -280,7 +281,7 @@ class InspectorCliTests(unittest.TestCase):
         self.assertEqual(report["rtol"], 1e-5)
         self.assertEqual(report["atol"], 1e-6)
 
-    def test_model_preparation_disables_inplace_silu_and_uses_c2f_split(self):
+    def test_model_preparation_disables_inplace_silu_without_changing_c2f(self):
         class FakeSiLU:
             def __init__(self, inplace):
                 self.inplace = inplace
@@ -301,20 +302,112 @@ class InspectorCliTests(unittest.TestCase):
         unrelated = Unrelated()
         model = SimpleNamespace(modules=lambda: [model, inplace_silu, safe_silu, c2f, unrelated])
 
-        changes = inspect_cli.prepare_model_for_vitis_inspection(model, FakeSiLU, FakeC2f)
+        changes = inspect_cli.prepare_model_for_vitis_inspection(model, FakeSiLU)
 
         self.assertEqual(
             changes,
-            {"silu_inplace_disabled": 1, "c2f_forward_split_enabled": 1},
+            {"silu_inplace_disabled": 1, "c2f_forward_split_enabled": 0},
         )
         self.assertFalse(inplace_silu.inplace)
         self.assertFalse(safe_silu.inplace)
-        self.assertEqual(c2f.forward("input"), ("split", "input"))
+        self.assertEqual(c2f.forward("input"), ("chunk", "input"))
         self.assertFalse(hasattr(unrelated, "inplace"))
 
-        copied = copy.deepcopy(c2f)
+    def test_activation_experiment_rebinds_unique_silu_modules(self):
+        class FakeSiLU:
+            def forward(self, value):
+                return ("silu", value)
+
+        class Unrelated:
+            def forward(self, value):
+                return ("unrelated", value)
+
+        def hard_forward(_module, value):
+            return ("hardswish", value)
+
+        first = FakeSiLU()
+        second = FakeSiLU()
+        unrelated = Unrelated()
+        model = SimpleNamespace(modules=lambda: [model, first, second, unrelated])
+
+        changes = inspect_cli.apply_activation_experiment(
+            model, FakeSiLU, "hardswish", hard_forward
+        )
+
+        self.assertEqual(changes, {"silu_activation_replaced": 2})
+        self.assertEqual(first.forward("input"), ("hardswish", "input"))
+        self.assertEqual(second.forward("input"), ("hardswish", "input"))
+        self.assertEqual(unrelated.forward("input"), ("unrelated", "input"))
+
+        copied = copy.deepcopy(first)
         self.assertIs(copied.forward.__self__, copied)
-        self.assertEqual(copied.forward("input"), ("split", "input"))
+        self.assertEqual(copied.forward("input"), ("hardswish", "input"))
+
+    def test_activation_experiment_rejects_none(self):
+        model = SimpleNamespace(modules=lambda: [])
+
+        with self.assertRaisesRegex(ValueError, "explicit hard activation"):
+            inspect_cli.apply_activation_experiment(model, object, "none", lambda *_args: None)
+
+    def test_activation_forward_factory_selects_requested_functional(self):
+        functional = SimpleNamespace(
+            hardswish=lambda value: ("hardswish", value),
+            hardsigmoid=lambda value: ("hardsigmoid", value),
+        )
+
+        hardswish = inspect_cli.make_activation_forward(functional, "hardswish")
+        hardsigmoid = inspect_cli.make_activation_forward(functional, "hardsigmoid")
+
+        self.assertEqual(hardswish(None, "input"), ("hardswish", "input"))
+        self.assertEqual(hardsigmoid(None, "input"), ("hardsigmoid", "input"))
+
+    def test_activation_mode_metadata_distinguishes_audit_and_experiment(self):
+        audit = inspect_cli.activation_mode_metadata("none")
+        experiment = inspect_cli.activation_mode_metadata("hardsigmoid")
+
+        self.assertEqual(audit["mode"], "original_model_audit")
+        self.assertEqual(audit["activation_experiment"], "none")
+        self.assertTrue(audit["semantic_equivalence_required"])
+        self.assertFalse(audit["checkpoint_modified"])
+        self.assertEqual(experiment["mode"], "deployment_activation_experiment")
+        self.assertEqual(experiment["activation_experiment"], "hardsigmoid")
+        self.assertFalse(experiment["semantic_equivalence_required"])
+        self.assertFalse(experiment["checkpoint_modified"])
+
+    def test_prediction_gate_always_rejects_shape_mismatch(self):
+        comparison = {"shape_matches": False, "allclose": False}
+
+        with self.assertRaisesRegex(inspect_cli.ModelPreparationError, "shape"):
+            inspect_cli.enforce_prediction_comparison(
+                comparison, semantic_equivalence_required=False
+            )
+
+    def test_prediction_gate_requires_allclose_only_for_original_audit(self):
+        comparison = {"shape_matches": True, "allclose": False}
+
+        with self.assertRaisesRegex(inspect_cli.ModelPreparationError, "changed raw predictions"):
+            inspect_cli.enforce_prediction_comparison(
+                comparison, semantic_equivalence_required=True
+            )
+
+        inspect_cli.enforce_prediction_comparison(
+            comparison, semantic_equivalence_required=False
+        )
+
+    def test_model_preparation_payload_marks_non_equivalent_experiment(self):
+        comparison = {"shape_matches": True, "allclose": False}
+
+        payload = inspect_cli.build_model_preparation_payload(
+            "hardswish",
+            {"silu_inplace_disabled": 1, "silu_activation_replaced": 1},
+            comparison,
+        )
+
+        self.assertEqual(payload["mode"], "deployment_activation_experiment")
+        self.assertFalse(payload["semantic_equivalence_required"])
+        self.assertFalse(payload["checkpoint_modified"])
+        self.assertEqual(payload["changes"]["silu_activation_replaced"], 1)
+        self.assertIs(payload["prediction_comparison"], comparison)
 
     def test_vitis_35_compatibility_reports_unknown_3d_permute(self):
         class FakeOp:
@@ -384,7 +477,25 @@ class InspectorCliTests(unittest.TestCase):
         self.assertEqual(args.imgsz, 640)
         self.assertEqual(args.verbose_level, 2)
         self.assertEqual(args.image_format, "svg")
+        self.assertEqual(args.activation_experiment, "none")
         self.assertFalse(args.overwrite)
+
+    def test_inspector_accepts_only_named_activation_experiments(self):
+        parser = inspect_cli.build_parser()
+        base = ["--weights", "best.pt", "--target", "TARGET", "--output-dir", "inspect"]
+
+        self.assertEqual(
+            parser.parse_args([*base, "--activation-experiment", "hardswish"]).activation_experiment,
+            "hardswish",
+        )
+        self.assertEqual(
+            parser.parse_args(
+                [*base, "--activation-experiment", "hardsigmoid"]
+            ).activation_experiment,
+            "hardsigmoid",
+        )
+        with self.assertRaises(SystemExit):
+            parser.parse_args([*base, "--activation-experiment", "silu"])
 
     def test_existing_manifest_requires_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -393,6 +504,118 @@ class InspectorCliTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileExistsError, "--overwrite"):
                 inspect_cli.prepare_manifest(Path(directory), overwrite=False)
+
+
+class VitisReportTests(unittest.TestCase):
+    REPORT_HEADER = """hardware constraints
+node name    op Type    hardware constraints
+"""
+    REPORT_ROWS = """DetectionModel::conv/act    aten::silu    aten::silu can't be converted to XIR.
+DetectionModel::conv/transpose    nndct_permute    xir::Op has been assigned to CPU.
+DetectionModel::custom    nndct_custom    Target-specific constraint.
+"""
+
+    def test_report_summary_deduplicates_and_classifies_repeated_rows(self):
+        text = self.REPORT_HEADER + self.REPORT_ROWS * 3
+
+        summary = vitis_report.summarize_inspector_report_text(text)
+
+        self.assertEqual(summary["parsed_row_count"], 9)
+        self.assertEqual(summary["unique_row_count"], 3)
+        self.assertEqual(summary["repeated_row_count"], 6)
+        self.assertEqual(summary["unique_node_count"], 3)
+        self.assertEqual(
+            summary["category_counts"],
+            {"direct_unsupported": 1, "downstream_cpu": 1, "other_cpu_constraint": 1},
+        )
+        self.assertEqual(
+            summary["operators_by_category"],
+            {
+                "direct_unsupported": {"aten::silu": 1},
+                "downstream_cpu": {"nndct_permute": 1},
+                "other_cpu_constraint": {"nndct_custom": 1},
+            },
+        )
+        self.assertEqual(summary["direct_blockers"]["aten::silu"]["count"], 1)
+        self.assertEqual(len(summary["direct_blockers"]["aten::silu"]["examples"]), 1)
+        self.assertTrue(summary["requires_cpu_fallback"])
+
+    def test_empty_hardware_constraints_table_has_zero_findings(self):
+        summary = vitis_report.summarize_inspector_report_text(self.REPORT_HEADER)
+
+        self.assertEqual(summary["parsed_row_count"], 0)
+        self.assertEqual(summary["unique_row_count"], 0)
+        self.assertFalse(summary["requires_cpu_fallback"])
+
+    def test_target_capability_constraints_are_direct_blockers(self):
+        reasons = (
+            "xir::Op has been assigned to CPU: "
+            "[DPUCZDX8G_ISA1_B4096 does not support eltwise DIV].",
+            "xir::Op has been assigned to CPU: "
+            '[DPU only supports positive "input_channel"(0)].',
+        )
+
+        for reason in reasons:
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    vitis_report.classify_constraint_reason(reason),
+                    "direct_unsupported",
+                )
+
+    def test_file_summary_records_resolved_report_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inspect_TARGET.txt"
+            report.write_text(self.REPORT_HEADER + self.REPORT_ROWS, encoding="utf-8")
+
+            summary = vitis_report.summarize_inspector_report(report)
+
+            self.assertEqual(summary["report_path"], str(report.resolve()))
+            self.assertEqual(summary["unique_row_count"], 3)
+
+    def test_non_report_text_is_rejected(self):
+        with self.assertRaisesRegex(vitis_report.InspectorReportError, "hardware constraints"):
+            vitis_report.summarize_inspector_report_text("unrelated non-empty output")
+
+    def test_find_generated_report_detects_new_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            before = vitis_report.snapshot_report_signatures(output_dir)
+            report = output_dir / "inspect_TARGET.txt"
+            report.write_text(self.REPORT_HEADER, encoding="utf-8")
+
+            generated = vitis_report.find_generated_report(output_dir, before)
+
+            self.assertEqual(generated, report.resolve())
+
+    def test_find_generated_report_detects_updated_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            report = output_dir / "inspect_TARGET.txt"
+            report.write_text("old", encoding="utf-8")
+            before = vitis_report.snapshot_report_signatures(output_dir)
+            report.write_text(self.REPORT_HEADER, encoding="utf-8")
+
+            generated = vitis_report.find_generated_report(output_dir, before)
+
+            self.assertEqual(generated, report.resolve())
+
+    def test_find_generated_report_rejects_no_changed_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            before = vitis_report.snapshot_report_signatures(output_dir)
+
+            with self.assertRaisesRegex(vitis_report.InspectorReportError, "did not generate"):
+                vitis_report.find_generated_report(output_dir, before)
+
+    def test_find_generated_report_rejects_multiple_changed_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            before = vitis_report.snapshot_report_signatures(output_dir)
+            (output_dir / "inspect_A.txt").write_text(self.REPORT_HEADER, encoding="utf-8")
+            (output_dir / "inspect_B.txt").write_text(self.REPORT_HEADER, encoding="utf-8")
+
+            with self.assertRaisesRegex(vitis_report.InspectorReportError, "multiple"):
+                vitis_report.find_generated_report(output_dir, before)
 
 
 @unittest.skipUnless(importlib.util.find_spec("onnx"), "onnx is not installed")

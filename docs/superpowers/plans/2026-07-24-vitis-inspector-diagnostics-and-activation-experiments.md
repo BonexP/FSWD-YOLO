@@ -18,7 +18,7 @@
 
 - [ ] **Step 1: Write failing parser tests**
 
-Add `VitisReportTests` with a representative hardware-constraint table repeated three times. Assert that `summarize_inspector_report_text()` returns:
+Add `VitisReportTests` with a representative hardware-constraint table deliberately repeated three times to verify protection against copied or concatenated report sections. Assert that `summarize_inspector_report_text()` returns:
 
 ```python
 {

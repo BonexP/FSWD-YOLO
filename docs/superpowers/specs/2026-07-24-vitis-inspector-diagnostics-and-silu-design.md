@@ -8,7 +8,7 @@ Turn a successful Vitis AI Inspector invocation into an accurate compatibility a
 
 The run for `DPUCZDX8G_ISA1_B4096` completed and preserved the raw prediction tensor exactly. However, `status: ok` only means that Inspector completed. It does not mean that the complete model was assigned to the DPU.
 
-After deduplicating repeated report rows by node name, operator, and reason, the graph has 322 unique CPU findings. Its direct blockers include:
+Parsing the attached report by node name, operator, and reason yields 322 unique CPU findings. Raw substring counts were higher because an operator string can occur in the node name, operator column, and reason on the same row. Its direct blockers include:
 
 - 77 `aten::silu` nodes that cannot be converted to XIR
 - 24 `nndct_strided_slice` nodes that cannot be assigned to the DPU
@@ -98,9 +98,9 @@ The two activations must be tested in separate output directories. The experimen
 
 After `Inspector.inspect()` returns, the CLI will locate the newly generated `inspect_*.txt` report. A focused parser will recognize rows containing a node name, operator type, and hardware-constraint reason.
 
-Rows will be deduplicated by all three fields because Vitis AI 3.5 repeats the findings table. Reasons will be classified as:
+Rows will be deduplicated by all three fields so copied, concatenated, or otherwise repeated report sections cannot inflate compatibility counts. The attached Vitis AI 3.5 report itself contains 322 parsed rows and 322 unique rows. Reasons will be classified as:
 
-- `direct_unsupported`: contains `can't be converted to XIR`, `can't be assigned to DPU`, `Try to assign`, or `Convert nndct graph to XIR failed`
+- `direct_unsupported`: contains `can't be converted to XIR`, `can't be assigned to DPU`, `Try to assign`, `Convert nndct graph to XIR failed`, `does not support`, or `only supports`
 - `downstream_cpu`: indicates that inputs, children, concat operands, reshape inputs, or inserted transpose operations are already on CPU
 - `other_cpu_constraint`: any parsed CPU constraint not covered above
 

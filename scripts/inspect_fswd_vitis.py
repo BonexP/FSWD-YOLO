@@ -9,12 +9,15 @@ import os
 import platform
 import sys
 from pathlib import Path
+from types import MethodType
 from typing import Any, Dict, Optional, Sequence
 
 try:
     from scripts import fswd_deploy_common as common
+    from scripts import fswd_vitis_report as vitis_report
 except ImportError:  # Direct execution: python scripts/inspect_fswd_vitis.py
     import fswd_deploy_common as common
+    import fswd_vitis_report as vitis_report
 
 
 REPO_ROOT = common.add_repo_root_to_path(Path(__file__))
@@ -26,9 +29,20 @@ class ModelPreparationError(RuntimeError):
     """Raised when a Vitis graph preparation changes model predictions."""
 
 
-def prepare_model_for_vitis_inspection(
-    model: Any, silu_class: Any, c2f_class: Any
-) -> Dict[str, int]:
+def activation_mode_metadata(activation_experiment: str) -> Dict[str, Any]:
+    """Describe whether this run audits the checkpoint or changes activation semantics."""
+    if activation_experiment not in {"none", "hardswish", "hardsigmoid"}:
+        raise ValueError(f"unsupported activation experiment: {activation_experiment}")
+    is_audit = activation_experiment == "none"
+    return {
+        "mode": "original_model_audit" if is_audit else "deployment_activation_experiment",
+        "activation_experiment": activation_experiment,
+        "semantic_equivalence_required": is_audit,
+        "checkpoint_modified": False,
+    }
+
+
+def prepare_model_for_vitis_inspection(model: Any, silu_class: Any) -> Dict[str, int]:
     """Apply semantics-preserving graph forms preferred by Vitis AI Inspector."""
     changes = {"silu_inplace_disabled": 0, "c2f_forward_split_enabled": 0}
     for module in model.modules():
@@ -36,13 +50,37 @@ def prepare_model_for_vitis_inspection(
             module.inplace = False
             changes["silu_inplace_disabled"] += 1
 
-        if isinstance(module, c2f_class) and callable(getattr(module, "forward_split", None)):
-            current_function = getattr(module.forward, "__func__", module.forward)
-            split_function = getattr(module.forward_split, "__func__", module.forward_split)
-            if current_function is not split_function:
-                module.forward = module.forward_split
-                changes["c2f_forward_split_enabled"] += 1
     return changes
+
+
+def apply_activation_experiment(
+    model: Any,
+    silu_class: Any,
+    activation_name: str,
+    forward_function: Any,
+) -> Dict[str, int]:
+    """Bind an explicit non-equivalent hard activation to SiLU modules in memory."""
+    if activation_name not in {"hardswish", "hardsigmoid"}:
+        raise ValueError("activation experiment requires an explicit hard activation")
+
+    replaced = 0
+    for module in model.modules():
+        if isinstance(module, silu_class):
+            module.forward = MethodType(forward_function, module)
+            replaced += 1
+    return {"silu_activation_replaced": replaced}
+
+
+def make_activation_forward(functional: Any, activation_name: str) -> Any:
+    """Build the unbound module forward used by a hard-activation experiment."""
+    if activation_name not in {"hardswish", "hardsigmoid"}:
+        raise ValueError("activation experiment requires an explicit hard activation")
+    activation = getattr(functional, activation_name)
+
+    def forward(_module: Any, value: Any) -> Any:
+        return activation(value)
+
+    return forward
 
 
 def compare_prediction_tensors(
@@ -78,6 +116,33 @@ def compare_prediction_tensors(
         "mean_absolute_error": float(absolute_error.mean().item()),
         "rtol": rtol,
         "atol": atol,
+    }
+
+
+def enforce_prediction_comparison(
+    comparison: Dict[str, Any], semantic_equivalence_required: bool
+) -> None:
+    """Reject shape changes and unexpected drift in original-model audit mode."""
+    if not comparison["shape_matches"]:
+        raise ModelPreparationError(
+            "Vitis graph preparation changed the raw prediction shape."
+        )
+    if semantic_equivalence_required and not comparison["allclose"]:
+        raise ModelPreparationError(
+            "Vitis graph preparation changed raw predictions; inspect model_preparation in the manifest."
+        )
+
+
+def build_model_preparation_payload(
+    activation_experiment: str,
+    changes: Dict[str, int],
+    prediction_comparison: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Combine stable mode metadata with changes and prediction evidence."""
+    return {
+        **activation_mode_metadata(activation_experiment),
+        "changes": changes,
+        "prediction_comparison": prediction_comparison,
     }
 
 
@@ -145,6 +210,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("svg", "png", "none"),
         default="svg",
         help="Inspector diagram format (default: svg)",
+    )
+    parser.add_argument(
+        "--activation-experiment",
+        choices=("none", "hardswish", "hardsigmoid"),
+        default="none",
+        help="Explicit non-equivalent activation graph experiment (default: none)",
     )
     parser.add_argument("--seed", type=int, default=0, help="Inspector input seed (default: 0)")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing manifest")
@@ -227,7 +298,6 @@ def run(args: argparse.Namespace) -> int:
         from pytorch_nndct.apis import Inspector
         from pytorch_nndct.hardware_v3.inspector import InspectorImpl
         from ultralytics import YOLO
-        from ultralytics.nn.modules import C2f
         from scripts.export_fswd_onnx import normalize_torch_prediction
 
         compatibility_applied = install_vitis_35_permute_report_compatibility(
@@ -246,7 +316,19 @@ def run(args: argparse.Namespace) -> int:
                 normalize_torch_prediction(model(dummy)).detach().cpu().clone()
             )
 
-        preparation_changes = prepare_model_for_vitis_inspection(model, torch.nn.SiLU, C2f)
+        preparation_changes = prepare_model_for_vitis_inspection(model, torch.nn.SiLU)
+        mode = activation_mode_metadata(args.activation_experiment)
+        if args.activation_experiment == "none":
+            preparation_changes["silu_activation_replaced"] = 0
+        else:
+            preparation_changes.update(
+                apply_activation_experiment(
+                    model,
+                    torch.nn.SiLU,
+                    args.activation_experiment,
+                    make_activation_forward(torch.nn.functional, args.activation_experiment),
+                )
+            )
         with torch.no_grad():
             after_preparation = (
                 normalize_torch_prediction(model(dummy)).detach().cpu().clone()
@@ -258,15 +340,23 @@ def run(args: argparse.Namespace) -> int:
             rtol=MODEL_PREPARATION_RTOL,
             atol=MODEL_PREPARATION_ATOL,
         )
-        payload["model_preparation"] = {
-            "changes": preparation_changes,
-            "prediction_parity": preparation_parity,
-        }
-        if not preparation_parity["allclose"]:
-            raise ModelPreparationError(
-                "Vitis graph preparation changed raw predictions; inspect model_preparation in the manifest."
+        payload["model_preparation"] = build_model_preparation_payload(
+            args.activation_experiment,
+            preparation_changes,
+            preparation_parity,
+        )
+        enforce_prediction_comparison(
+            preparation_parity,
+            semantic_equivalence_required=mode["semantic_equivalence_required"],
+        )
+        if not mode["semantic_equivalence_required"]:
+            print(
+                "WARNING: This is a non-equivalent deployment activation experiment. "
+                "Its Inspector result does not establish retained model accuracy; "
+                "retraining or fine-tuning is required."
             )
 
+        reports_before = vitis_report.snapshot_report_signatures(output_dir)
         Inspector(args.target).inspect(
             model,
             (dummy,),
@@ -275,12 +365,20 @@ def run(args: argparse.Namespace) -> int:
             verbose_level=args.verbose_level,
             image_format=None if args.image_format == "none" else args.image_format,
         )
+        report_path = vitis_report.find_generated_report(output_dir, reports_before)
+        payload["inspection_summary"] = vitis_report.summarize_inspector_report(
+            report_path
+        )
 
         payload["status"] = "ok"
         payload["completed_utc"] = common.utc_now()
         common.write_json_atomic(manifest, payload, overwrite=args.overwrite)
         print(f"Inspector output: {output_dir}")
         print(f"Inspection manifest: {manifest}")
+        print(
+            "Unique CPU findings: "
+            f"{payload['inspection_summary']['unique_row_count']}"
+        )
         return 0
     except Exception as exc:
         payload["status"] = "failed"
@@ -299,6 +397,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         FileExistsError,
         FileNotFoundError,
         ModelPreparationError,
+        vitis_report.InspectorReportError,
         ValueError,
     ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

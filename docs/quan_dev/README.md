@@ -83,19 +83,42 @@ python scripts/inspect_fswd_vitis.py \
 
 Vitis AI 3.5 的 Inspector 报告代码没有为 3D permute `(0, 2, 1)` 提供布局说明，可能在编译完成后以 `KeyError: (0, 2, 1)` 退出。包装器仅在检测到该版本的危险直接索引实现时安装报告层兼容方法：已知布局保留原说明，未知布局记录原始 permutation order。manifest 的 `compatibility.vitis_35_permute_report_patch_applied` 会说明本次是否应用补丁。该兼容处理不改变模型图、DPU 分区或编译结果。
 
-Inspector 包装器还会在内存模型上执行两项部署准备：把 `nn.SiLU.inplace` 设为 `False`，并让 `C2f` 派生模块使用 Ultralytics 已提供的 `forward_split()`。它不会修改 checkpoint 或训练模型定义。脚本使用同一个确定性输入比较准备前后的原始预测；shape 或 `torch.allclose(rtol=1e-5, atol=1e-6)` 不通过时会停止检查。manifest 的 `model_preparation` 会记录变换数量和最大/平均绝对误差。
+默认的 `--activation-experiment none` 是原模型审计。包装器只在内存中把 `nn.SiLU.inplace` 设为 `False`，不再绑定 `C2f.forward_split()`，也不会修改 checkpoint 或训练模型定义。脚本使用同一个确定性输入比较准备前后的原始预测；shape 或 `torch.allclose(rtol=1e-5, atol=1e-6)` 不通过时会停止检查。manifest 的 `model_preparation` 会记录 `mode: original_model_audit`、准备计数和最大/平均绝对误差。
 
-保留第一轮 Inspector 目录作为基线，第二轮使用新目录：
+Inspector 完成后，脚本会解析本次生成的 `inspect_*.txt`，按节点、算子和原因去重，并把以下内容写入 `inspection_summary`：唯一 CPU finding 数、分类计数、各类算子计数、直接阻塞算子的示例，以及 `requires_cpu_fallback`。顶层 `status: ok` 只表示脚本和 Inspector 成功执行；如果 `requires_cpu_fallback: true`，就不能解释为模型能够全图运行在 DPU 上。不要用 `grep -c` 的原始次数作为节点数，因为同一报告行的节点名、算子列和原因列可能多次出现相同算子字符串。
+
+先用独立目录重新建立原模型审计基线：
 
 ```bash
 python scripts/inspect_fswd_vitis.py \
   --weights /workspace/best.pt \
   --target DPUCZDX8G_ISA1_B4096 \
-  --output-dir /workspace/inspect_fswd_b4096_prepared \
+  --output-dir /workspace/inspect_fswd_b4096_audit \
+  --activation-experiment none \
   --overwrite
 ```
 
-运行后比较两个 `inspect_*.txt` 中的 `aten::silu_`、`nndct_strided_slice`、CPU 算子列表，并对照控制台的 device subgraph 与 DPU subgraph 数量。只有实际减少 CPU 根算子或合并 DPU 子图，才能证明这些图变换改善了目标兼容性。
+为了判断替换激活函数能否减少直接阻塞，可以分别运行两个显式的非等价图实验：
+
+```bash
+python scripts/inspect_fswd_vitis.py \
+  --weights /workspace/best.pt \
+  --target DPUCZDX8G_ISA1_B4096 \
+  --output-dir /workspace/inspect_fswd_b4096_hardswish \
+  --activation-experiment hardswish \
+  --overwrite
+
+python scripts/inspect_fswd_vitis.py \
+  --weights /workspace/best.pt \
+  --target DPUCZDX8G_ISA1_B4096 \
+  --output-dir /workspace/inspect_fswd_b4096_hardsigmoid \
+  --activation-experiment hardsigmoid \
+  --overwrite
+```
+
+这两个实验只在内存中替换 SiLU 的前向运算。数值不一致是预期结果，脚本会记录 `prediction_comparison` 的漂移但仍运行 Inspector；输出 shape 改变仍会中止。实验成功只说明相应图的 target 分区情况，不说明原 checkpoint 保持了检测精度，也不会产生可部署 checkpoint。最终采用任何非等价替换前都必须重新训练或微调并验证精度。
+
+比较三个 manifest 的 `inspection_summary.direct_blockers`、`operators_by_category` 和 `category_counts`，并对照 Inspector 控制台的 device/DPU subgraph 数量。只有直接阻塞算子减少且 DPU 分区更连续，才能把某个激活函数列为后续训练候选；这仍不等于量化、编译或板上运行已经通过。
 
 ## Vitis 环境依赖原则
 
