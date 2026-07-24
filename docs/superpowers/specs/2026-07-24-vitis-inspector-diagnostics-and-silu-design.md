@@ -1,106 +1,138 @@
-# Vitis Inspector Diagnostics and SiLU Experiment Design
+# Vitis Inspector Diagnostics and Activation Experiments Design
 
 ## Goal
 
-Turn the successful Vitis AI Inspector run into an accurate compatibility assessment and test one semantics-preserving SiLU graph form without mixing it with other model rewrites.
+Turn a successful Vitis AI Inspector invocation into an accurate compatibility assessment, then compare explicit DPU-oriented activation experiments without presenting a modified graph as the original FSWD-YOLO model.
 
 ## Evidence From the Prepared Run
 
-The run for `DPUCZDX8G_ISA1_B4096` completed successfully and preserved the raw prediction tensor exactly. However, `status: ok` only means that Inspector completed. It does not mean that the complete model was assigned to the DPU.
+The run for `DPUCZDX8G_ISA1_B4096` completed and preserved the raw prediction tensor exactly. However, `status: ok` only means that Inspector completed. It does not mean that the complete model was assigned to the DPU.
 
-The generated report contains three textual copies of each finding. After deduplication by node name, operator, and reason, the graph has 322 CPU findings and the following direct blockers:
+After deduplicating repeated report rows by node name, operator, and reason, the graph has 322 unique CPU findings. Its direct blockers include:
 
 - 77 `aten::silu` nodes that cannot be converted to XIR
 - 24 `nndct_strided_slice` nodes that cannot be assigned to the DPU
-- attention-path blockers in `C2PSFCA`, including `nndct_conv1d`, `nndct_expand_as`, `nndct_matmul`, `nndct_sum`, `nndct_softmax`, and shape-constrained `nndct_sigmoid`
+- `C2PSFCA` attention operators including `nndct_conv1d`, `nndct_expand_as`, `nndct_matmul`, `nndct_sum`, `nndct_softmax`, and shape-constrained `nndct_sigmoid`
 
-The previous preparation changed `aten::silu_` into `aten::silu`, so counting only `aten::silu_` incorrectly suggested success. The previous `C2f.forward_split` binding also changed `chunk` into `split` without reducing the 24 unique `nndct_strided_slice` nodes. Both observations come from the target-specific Inspector output rather than an assumed operator list.
+The previous preparation changed `aten::silu_` into `aten::silu`, so counting only `aten::silu_` incorrectly suggested success. Binding `C2f.forward_split` changed `chunk` into `split` without reducing the 24 unique `nndct_strided_slice` nodes.
+
+## Documentation Findings
+
+The Vitis AI 3.5 PyTorch operator table does not list SiLU. It lists Hardswish and Hardsigmoid, states that ordinary tensor slices become `aten::slice`, and states that a slice is compiled for the CPU unless it can be removed or fused. It also states that Softmax is CPU-only in this PyTorch path and that Matmul reaches the DPU only when it can be transformed into Conv2d.
+
+The DPUCZDX8G product guide lists ReLU, ReLU6, LeakyReLU, Hard Sigmoid, and Hard Swish as supported activation capabilities. It also makes support dependent on DPU configuration and identifies the generated `arch.json` as the compiler description of the final hardware.
+
+The third-party YOLOv11 experiment follows the same pattern: it replaces SiLU, replaces Chunk with a convolutional operation, and removes or approximates unsupported attention and post-processing operations. Its Hardswish graph still produced multiple DPU subgraphs, so it ultimately used Hardsigmoid and retrained. This is useful experimental evidence, not a guarantee for FSWD-YOLO or the selected target.
+
+The supplied Vitis AI 1.4.1 custom-layer page describes TensorFlow2 `custom_objects` and custom quantization strategies. It does not establish PyTorch DPU execution. Vitis AI 3.5 Custom OP support can implement operations as CPU OPs for GraphRunner, but that is a heterogeneous deployment route rather than an all-DPU conversion.
+
+## Design Principles
+
+The tool will separate two questions:
+
+1. **Original-model audit:** What can the unmodified checkpoint execute on for the selected target?
+2. **Deployment experiment:** What graph partition results from an explicitly selected, non-equivalent activation replacement?
+
+The default command must answer the first question. It must never apply an accuracy-changing activation replacement implicitly. An experimental result must identify itself as a deployment experiment in the manifest and console output.
 
 ## Scope
 
 This iteration will:
 
-- parse the generated Inspector text report after every successful run
-- deduplicate repeated report rows
-- distinguish direct unsupported operators from downstream CPU-placement effects
-- record the compatibility assessment in `inspection_manifest.json`
-- replace Inspector-only SiLU execution with the mathematical form `x * sigmoid(x)`
-- preserve the deterministic prediction-equivalence gate
-- remove the ineffective Inspector-only `C2f.forward_split` binding
+- parse and deduplicate the generated Inspector text report
+- classify direct blockers separately from downstream CPU effects
+- record a compatibility summary in `inspection_manifest.json`
+- stop binding `C2f.forward_split`, because the target report proved it ineffective
+- retain the semantics-preserving change from in-place to non-in-place SiLU for tracing
+- add `--activation-experiment {none,hardswish,hardsigmoid}` with `none` as the default
+- measure prediction drift for every experiment
+- run Inspector for an explicitly requested non-equivalent experiment even though strict parity is not expected
 
 This iteration will not:
 
-- alter training-time model definitions or checkpoint contents
-- install or update Vitis AI packages
-- claim hardware execution or performance without a board
+- alter training-time model definitions or checkpoint files
+- claim that Hardswish or Hardsigmoid preserves model accuracy
+- select a deployment activation before comparing target-specific reports
 - rewrite C2f channel splitting
-- rewrite `C2PSFCA` attention
-- compile or quantize the model
+- rewrite `C2PSFCA`
+- install or update dependencies
+- quantize or compile the model
+- claim final board compatibility without the board's target fingerprint or `arch.json`
+
+## Original-Model Audit
+
+With `--activation-experiment none`, the CLI will disable only in-place behavior on existing `torch.nn.SiLU` modules. This preserves SiLU mathematics while allowing NNDCT to trace the graph. It will not bind `C2f.forward_split`.
+
+The CLI will compare deterministic raw predictions before and after preparation. Equal shapes and `torch.allclose` with `rtol=1e-5` and `atol=1e-6` remain a hard gate before Inspector. The manifest will record:
+
+- `mode: original_model_audit`
+- `semantic_equivalence_required: true`
+- preparation counters
+- shape, allclose, maximum error, and mean error
+
+## Activation Experiments
+
+With `--activation-experiment hardswish` or `hardsigmoid`, the CLI will first apply the semantics-preserving tracing preparation, then replace each unique SiLU module's forward operation in memory with the selected hard activation. It will not write a checkpoint.
+
+The CLI will evaluate the experimental graph on the same deterministic input and record the same drift metrics. A shape mismatch remains a hard failure. A numerical mismatch is expected and will not stop Inspector because the user explicitly selected a non-equivalent experiment.
+
+The manifest will record:
+
+- `mode: deployment_activation_experiment`
+- `activation_experiment`
+- `semantic_equivalence_required: false`
+- `checkpoint_modified: false`
+- unique module replacement count
+- prediction drift metrics
+
+The console must print a clear warning that the resulting Inspector report says nothing about retained model accuracy and that retraining or fine-tuning is required before deployment use.
+
+The two activations must be tested in separate output directories. The experiment is useful only for graph selection:
+
+- direct activation blocker counts
+- new blocker types introduced by the activation
+- downstream CPU-node reduction
+- DPU partition continuity visible in the Inspector report
 
 ## Report Analysis
 
-The existing Inspector CLI will locate the generated `inspect_*.txt` file after `Inspector.inspect()` returns. A focused parser will recognize hardware-constraint rows with these fields:
+After `Inspector.inspect()` returns, the CLI will locate the newly generated `inspect_*.txt` report. A focused parser will recognize rows containing a node name, operator type, and hardware-constraint reason.
 
-1. node name
-2. operator type
-3. reason
-
-Rows will be deduplicated by all three fields because the Vitis AI 3.5 report repeats the same table in multiple sections. Reasons will be classified as:
+Rows will be deduplicated by all three fields because Vitis AI 3.5 repeats the findings table. Reasons will be classified as:
 
 - `direct_unsupported`: contains `can't be converted to XIR`, `can't be assigned to DPU`, `Try to assign`, or `Convert nndct graph to XIR failed`
-- `downstream_cpu`: indicates that inputs, children, or inserted transpose operations are already on CPU
-- `other_cpu_constraint`: any parsed CPU constraint that does not match the known direct or downstream forms
+- `downstream_cpu`: indicates that inputs, children, concat operands, reshape inputs, or inserted transpose operations are already on CPU
+- `other_cpu_constraint`: any parsed CPU constraint not covered above
 
-The manifest will add an `inspection_summary` object containing:
+The manifest will add `inspection_summary` containing:
 
 - report path
-- total parsed rows and total unique rows
-- unique node count
+- parsed and unique row counts
 - repeated-row count
+- unique node count
 - category counts
-- operator counts within each category
+- operator counts per category
 - representative node names and reasons for each direct blocker operator
-- `requires_cpu_fallback`, which is true when the report contains any unique CPU finding
+- `requires_cpu_fallback`, true whenever unique CPU findings exist
 
-The top-level `status` remains an execution status. `status: ok` means that tracing and report generation completed. It must not be used as a DPU-compatibility verdict.
+The top-level `status` remains an execution status. `status: ok` must not be interpreted as a full-DPU verdict.
 
-If no report is generated, more than one newly generated report is ambiguous, or a non-empty report cannot be parsed, the CLI will fail and write the reason to the manifest. A genuinely empty constraint table is recorded as zero findings rather than silently treated as a parser error.
+If no new report is generated, multiple new reports are ambiguous, or a non-empty report cannot be parsed, the CLI will fail and write the error to the manifest. An empty hardware-constraint table is recorded as zero findings.
 
-## SiLU Experiment
+## Decision Gates
 
-The Inspector model will retain the loaded weights and module topology, but each `torch.nn.SiLU` instance will receive an Inspector-only forward method equivalent to:
+The next Vitis host runs will use three new output directories for `none`, `hardswish`, and `hardsigmoid`. The report summaries will determine the activation candidate, but neither hard activation becomes a deployment solution until a separately trained model recovers acceptable validation and test accuracy.
 
-```python
-return x * torch.sigmoid(x)
-```
+After activation selection, later work will proceed as separate experiments:
 
-This tests whether NNDCT can lower the primitive multiplication and sigmoid graph even though it cannot convert `aten::silu`. The transformation does not assert that the target supports the expanded form; only the next target-specific Inspector report can establish that.
+1. Replace split-producing projections with equivalent dual convolution branches and require FP32 parity.
+2. Design a DPU-oriented `C2PSFCA` alternative using supported Conv2d, pooling, elementwise, and hard-activation operations.
+3. Create an explicitly named FSWD-YOLO-DPU training configuration.
+4. Initialize reusable weights, retrain or fine-tune, and compare accuracy with the original model.
+5. Quantize and compile with the final board's actual fingerprint or `arch.json`.
 
-The preparation manifest will replace the misleading `silu_inplace_disabled` and `c2f_forward_split_enabled` interpretation with explicit counters:
-
-- `silu_decomposed`
-- `c2f_forward_split_enabled: 0`
-
-The original and prepared models will run on the same seeded FP32 tensor. Inspection proceeds only when output shapes match and `torch.allclose` succeeds with the existing `rtol=1e-5` and `atol=1e-6`. Maximum and mean absolute error remain recorded. A mismatch is a hard failure before NNDCT inspection.
-
-## Single-Variable Comparison
-
-The next Vitis AI run must use a new output directory. Its report will be compared with the current prepared baseline using unique-node summaries, not raw string counts.
-
-The SiLU hypothesis is supported only if:
-
-- prediction parity passes
-- unique `aten::silu` direct blockers decrease from 77, ideally to zero
-- no new direct blocker replaces SiLU at comparable scale
-
-The hypothesis is rejected if `aten::silu` remains, the expanded sigmoid/multiply nodes become direct blockers, or prediction parity fails. In that case the repository will retain the diagnostic parser while the SiLU experiment will not be presented as a deployment solution.
-
-## Later Iterations
-
-After the SiLU result is isolated, channel slicing can be tested independently by replacing each split-producing projection with equivalent output-channel convolution branches. That transformation needs its own design because it changes module topology and can affect quantization even when FP32 predictions match.
-
-`C2PSFCA` is a separate architectural compatibility problem. Its attention operators should be assessed only after common activation and channel-split blockers are isolated, because changing it could require retraining or a DPU-oriented approximation.
+The original checkpoint and the DPU-oriented trained variant must remain distinct artifacts in reports and manuscript claims.
 
 ## Verification
 
-Dependency-free unit tests will cover report deduplication, reason classification, repeated rows, empty reports, malformed non-empty reports, manifest summary shape, SiLU method binding, and preparation counters. Existing prediction-parity tests will remain. Full local tests and static checks will run before commit, while the Vitis AI 3.5 host remains the required integration environment for the target-specific result.
+Dependency-free unit tests will cover report parsing, repeated-row deduplication, reason classification, empty and malformed reports, activation-mode argument validation, original-mode parity enforcement, experiment-mode drift recording, and preparation counters. Existing deployment-tool tests and static checks will run locally. The Vitis AI 3.5 host remains the required integration environment for target-specific graph results.
