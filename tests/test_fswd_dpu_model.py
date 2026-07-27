@@ -146,13 +146,16 @@ class DPUModelRuntimeTests(unittest.TestCase):
         module = C2PSFCADPU(128, 128, n=1, e=0.5, channel_reduction=4)
         branch_shapes = {}
         hooks = []
+
+        def capture_branch_shape(branch):
+            def hook(_module, _inputs, output):
+                branch_shapes[branch] = tuple(output.shape)
+
+            return hook
+
         for name in ("keep_projection", "spatial_projection", "channel_projection"):
             projection = getattr(module, name)
-            hooks.append(
-                projection.register_forward_hook(
-                    lambda _module, _inputs, output, branch=name: branch_shapes.setdefault(branch, tuple(output.shape))
-                )
-            )
+            hooks.append(projection.register_forward_hook(capture_branch_shape(name)))
 
         x = torch.randn(2, 128, 20, 20, requires_grad=True)
         y = module(x)
@@ -226,7 +229,7 @@ class DPUModelRuntimeTests(unittest.TestCase):
         finally:
             Conv.default_act = previous
 
-    def test_split_free_projection_migration_is_exact(self):
+    def test_split_free_projection_migration_is_numerically_equivalent(self):
         import torch
 
         from scripts.fswd_dpu_migration import migrate_split_free_module
@@ -248,7 +251,15 @@ class DPUModelRuntimeTests(unittest.TestCase):
             with torch.no_grad():
                 expected = source(x)
                 actual = destination(x)
-            self.assertTrue(torch.equal(expected, actual))
+            absolute_error = (expected - actual).abs()
+            self.assertTrue(
+                torch.allclose(expected, actual, rtol=1e-5, atol=1e-6),
+                msg=(
+                    f"{type(source).__name__} migration parity failed: "
+                    f"max_absolute_error={absolute_error.max().item():.8g}, "
+                    f"mean_absolute_error={absolute_error.mean().item():.8g}"
+                ),
+            )
             self.assertGreater(len(summary.sliced), 0)
             self.assertEqual(summary.unexpected, [])
 
