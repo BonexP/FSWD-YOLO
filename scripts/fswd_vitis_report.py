@@ -20,8 +20,10 @@ DIRECT_MARKERS = (
     "does not support",
     "only supports",
 )
+DIRECT_CPU_ASSIGNMENT_MARKERS = (
+    "has been assigned to cpu",
+)
 DOWNSTREAM_MARKERS = (
-    "assigned to cpu",
     "all input of concat are on cpu",
     "input of reshape is not on dpu",
     "input is from non-dpu device",
@@ -41,6 +43,8 @@ def classify_constraint_reason(reason: str) -> str:
     normalized = reason.lower()
     if any(marker in normalized for marker in DIRECT_MARKERS):
         return "direct_unsupported"
+    if any(marker in normalized for marker in DIRECT_CPU_ASSIGNMENT_MARKERS):
+        return "direct_cpu_assignment"
     if any(marker in normalized for marker in DOWNSTREAM_MARKERS):
         return "downstream_cpu"
     return "other_cpu_constraint"
@@ -79,8 +83,11 @@ def summarize_constraint_rows(rows: List[ConstraintRow]) -> Dict[str, Any]:
     }
 
     direct_by_operator = defaultdict(list)
-    for node, operator, reason in categorized.get("direct_unsupported", []):
-        direct_by_operator[operator].append({"node": node, "reason": reason})
+    for category in ("direct_unsupported", "direct_cpu_assignment"):
+        for node, operator, reason in categorized.get(category, []):
+            direct_by_operator[operator].append(
+                {"node": node, "reason": reason, "category": category}
+            )
     direct_blockers = {
         operator: {
             "count": len(examples),

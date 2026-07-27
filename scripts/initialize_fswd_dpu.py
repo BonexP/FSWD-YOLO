@@ -63,22 +63,42 @@ def initialize_requirements() -> Dict[str, str]:
     }
 
 
+def migration_semantics() -> Dict[str, Any]:
+    """Describe which migration transformations are and are not functionally equivalent."""
+    return {
+        "source_to_candidate_fp32_equivalent": False,
+        "reason": (
+            "The destination intentionally replaces SiLU and C2PSFCA; successful state mapping "
+            "does not imply source-model prediction parity."
+        ),
+        "gsconv_shuffle_rewrite": "exact_when_activation_modules_match",
+    }
+
+
 def _serialize_arguments(args: argparse.Namespace) -> Dict[str, Any]:
     return {name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()}
 
 
 def _model_metrics(model: Any, imgsz: int, get_flops: Any) -> Dict[str, Any]:
     parameters = sum(parameter.numel() for parameter in model.parameters())
+    deployment_tensors = sum(tensor.numel() for tensor in model.state_dict().values())
     flops = float(get_flops(model, imgsz))
     return {
         "parameters": int(parameters),
+        "persistent_buffers": int(deployment_tensors - parameters),
+        "deployment_tensors": int(deployment_tensors),
         "gflops": flops,
         "gflops_available": flops > 0.0,
     }
 
 
 def _resource_comparison(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str, Any]:
-    parameter_ratio = destination["parameters"] / source["parameters"] if source["parameters"] else None
+    source_deployment = source.get("deployment_tensors", source["parameters"])
+    destination_deployment = destination.get("deployment_tensors", destination["parameters"])
+    parameter_ratio = destination_deployment / source_deployment if source_deployment else None
+    learned_parameter_ratio = (
+        destination["parameters"] / source["parameters"] if source["parameters"] else None
+    )
     flop_ratio = (
         destination["gflops"] / source["gflops"]
         if source["gflops_available"] and destination["gflops_available"]
@@ -88,6 +108,8 @@ def _resource_comparison(source: Dict[str, Any], destination: Dict[str, Any]) ->
         "source": source,
         "destination": destination,
         "parameter_ratio": parameter_ratio,
+        "learned_parameter_ratio": learned_parameter_ratio,
+        "parameter_basis": "deployment_tensors",
         "flop_ratio": flop_ratio,
         "parameter_gate": parameter_ratio is not None and parameter_ratio <= 1.10,
         "flop_gate": flop_ratio is not None and flop_ratio <= 1.0,
@@ -137,6 +159,7 @@ def _base_report(
             "platform": platform.platform(),
         },
         "packages": common.package_versions(["torch", "ultralytics", "thop"]),
+        "migration_semantics": migration_semantics(),
     }
 
 

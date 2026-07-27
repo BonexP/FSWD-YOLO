@@ -122,7 +122,9 @@ python scripts/inspect_fswd_vitis.py \
 
 ## 3. DPU 候选模型的训练前筛选
 
-原始 `fswd-yolo.yaml` 和 `C2PSFCA` 保持不变。DPU 候选使用独立的 `ultralytics/cfg/models/11/fswd-yolo-dpu.yaml`：全局卷积激活为 Hardswish，C2f 类模块使用独立投影替代通道切片，`C2PSFCADPU` 仍保留 keep、spatial 和 channel 三分支。Detect 的卷积预测头保留在候选图中，DFL、框解码、sigmoid 和 NMS 留在主机端。
+原始 `fswd-yolo.yaml`、`C2PSFCA` 和 `VoVGSCSPC` 保持不变。DPU 候选使用独立的 `ultralytics/cfg/models/11/fswd-yolo-dpu.yaml`：全局卷积激活为 Hardswish，C2f 类模块使用独立投影替代通道切片，`C2PSFCADPU` 仍保留 keep、spatial 和 channel 三分支。第 19 层使用 `VoVGSCSPCDPU`；其中三个 `GSConvDPU` 保留原普通卷积、5x5 深度卷积、拼接和通道混洗语义，但以固定 one-hot 1x1 Conv 替代导致 CPU 分区的 `reshape -> permute -> reshape`。Detect 的卷积预测头保留在候选图中，DFL、框解码、sigmoid 和 NMS 留在主机端。
+
+固定置换权重以持久 buffer 保存，不会被 Trainer 优化，但会进入 checkpoint、THOP 和 DPU 图。资源报告分别记录可训练参数、持久 buffer 和总部署张量；110% 门槛使用总部署张量计算，避免把固定置换权重漏出预算。
 
 先在具有完整 PyTorch/Ultralytics/thop 环境的代码主机运行资源门槛检查：
 
@@ -135,7 +137,7 @@ python scripts/profile_fswd_dpu_candidate.py \
   --overwrite
 ```
 
-通过条件为候选参数量不超过原模型的 110%，并且候选 GFLOPs 不高于原模型。缺少 `thop` 或 FLOP 计算返回 0 时工具会失败，不会把未知结果当作通过。
+通过条件为候选总部署张量不超过原模型的 110%，并且候选 GFLOPs 不高于原模型。缺少 `thop` 或 FLOP 计算返回 0 时工具会失败，不会把未知结果当作通过。
 
 如果需要从现有 `best.pt` 初始化可训练候选，执行：
 
@@ -149,7 +151,7 @@ python scripts/initialize_fswd_dpu.py \
   --overwrite
 ```
 
-迁移工具会把原 C2f 融合投影的输出通道复制到独立投影，记录 C2PSFCA 重设计中新增和有意不映射的参数，并验证候选模型的 raw Detect 输出经过原生主机解码后与其常规 FP32 推理一致。源 checkpoint 不会被修改。生成的初始化 checkpoint 采用了新的激活函数和注意力结构，因此在重新训练或微调并验证之前不具备精度结论。
+迁移工具会把原 C2f 融合投影的输出通道复制到独立投影，完整复制 `VoVGSCSPC` 的已有权重并审计三个固定 shuffle buffer，记录 C2PSFCA 重设计中新增和有意不映射的参数，并验证候选模型的 raw Detect 输出经过原生主机解码后与其常规 FP32 推理一致。这里的 decode parity 只比较候选自身的 raw/decoded 两条路径，不比较源模型与候选模型。报告中的 `migration_semantics.source_to_candidate_fp32_equivalent` 固定为 `false`，因为目标 YAML 有意改用了 Hardswish 和 C2PSFCADPU；只有在激活模块一致时，GSConv shuffle 重写才是 FP32 等价变换。源 checkpoint 不会被修改。生成的初始化 checkpoint 在重新训练或微调并验证之前不具备精度结论。
 
 在 Vitis AI 3.5 主机上可以先检查随机权重候选图。这个步骤只判断图结构和 target 分区，不判断精度：
 
@@ -180,7 +182,7 @@ python -m json.tool /workspace/inspect_fswd_dpu_candidate/inspection_manifest.js
 grep -n "assigned to CPU\|can't be converted to XIR" /workspace/inspect_fswd_dpu_candidate/inspect_*.txt
 ```
 
-训练前图门槛要求 backbone、neck、`C2PSFCADPU`、卷积 Detect 头和三张 raw 输出中没有直接不支持或被迫分配到 CPU 的节点，并且 Inspector 控制台至少报告一个 DPU subgraph。`DPUCZDX8G_ISA1_B4096` 目前仅用于软件筛选；确定板卡后仍须使用该平台实际 `arch.json` 或 fingerprint 重新量化、编译和验证。
+训练前图门槛要求 backbone、neck、`C2PSFCADPU`、`VoVGSCSPCDPU`、卷积 Detect 头和三张 raw 输出中没有直接不支持或被迫分配到 CPU 的节点，即 `inspection_summary.requires_cpu_fallback` 必须为 `false`，并且 Inspector 控制台至少报告一个 DPU subgraph。报告解析器会把节点自身 `assigned to CPU` 归为 `direct_cpu_assignment`，把因上游不在 DPU 而传播的节点保留为 `downstream_cpu`。`DPUCZDX8G_ISA1_B4096` 目前仅用于软件筛选；确定板卡后仍须使用该平台实际 `arch.json` 或 fingerprint 重新量化、编译和验证。
 
 ## Vitis 环境依赖原则
 

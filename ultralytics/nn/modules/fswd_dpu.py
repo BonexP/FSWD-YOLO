@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 import torch
 from torch import nn
 
 from .block import Bottleneck, C3k, GhostBottleneck, SimamModule
-from .conv import Conv
+from .conv import Conv, DWConv
 
 __all__ = (
     "C2PSFCADPU",
@@ -14,7 +16,11 @@ __all__ = (
     "C3k2GhostSimAMinnerDPU",
     "DPUChannelAttentionBlock",
     "DPUSpatialAttentionBlock",
+    "FixedChannelShuffle",
+    "GSBottleneckCDPU",
+    "GSConvDPU",
     "SplitFreeC2f",
+    "VoVGSCSPCDPU",
 )
 
 
@@ -82,6 +88,100 @@ class C3k2GhostSimAMinnerDPU(SplitFreeC2f):
         self.m = nn.ModuleList(
             nn.Sequential(GhostBottleneck(self.c, self.c), SimamModule()) for _ in range(n)
         )
+
+
+class FixedChannelShuffle(nn.Module):
+    """Implement the GSConv channel permutation as a fixed pointwise convolution."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        if channels <= 0 or channels % 2:
+            raise ValueError("FixedChannelShuffle requires a positive even channel count")
+
+        self.conv = nn.Conv2d(channels, channels, 1, bias=False)
+        weight = torch.zeros_like(self.conv.weight)
+        half = channels // 2
+        for output_channel in range(channels):
+            input_channel = output_channel // 2 + (output_channel % 2) * half
+            weight[output_channel, input_channel, 0, 0] = 1.0
+        del self.conv._parameters["weight"]
+        self.conv.register_buffer("weight", weight, persistent=True)
+        self.conv._preserve_fixed_weight = True
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the immutable channel permutation."""
+        return self.conv(x)
+
+
+class GSConvDPU(nn.Module):
+    """GSConv with its channel shuffle expressed as a DPU pointwise convolution."""
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        k: int = 1,
+        s: int = 1,
+        p: Optional[int] = None,
+        g: int = 1,
+        d: int = 1,
+        act: Union[bool, nn.Module] = True,
+    ) -> None:
+        super().__init__()
+        if c2 <= 0 or c2 % 2:
+            raise ValueError("GSConvDPU requires a positive even output channel count")
+        hidden_channels = c2 // 2
+        self.cv1 = Conv(c1, hidden_channels, k, s, p, g, d, act)
+        self.cv2 = Conv(hidden_channels, hidden_channels, 5, 1, 2, hidden_channels, d, act)
+        self.shuffle = FixedChannelShuffle(c2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the standard and depthwise branches followed by fixed channel mixing."""
+        primary = self.cv1(x)
+        return self.shuffle(torch.cat((primary, self.cv2(primary)), dim=1))
+
+
+class GSBottleneckCDPU(nn.Module):
+    """Cheap GS bottleneck using only DPU-oriented GSConv paths."""
+
+    def __init__(self, c1: int, c2: int, k: int = 3, s: int = 1) -> None:
+        super().__init__()
+        hidden_channels = c2 // 2
+        self.conv_lighting = nn.Sequential(
+            GSConvDPU(c1, hidden_channels, 1, 1, 0),
+            GSConvDPU(hidden_channels, c2, 3, 1, 1, act=True),
+        )
+        self.shortcut = DWConv(c1, c2, k, s, act=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Combine the lighting and depthwise residual branches."""
+        return self.conv_lighting(x) + self.shortcut(x)
+
+
+class VoVGSCSPCDPU(nn.Module):
+    """DPU-oriented VoVGSCSPC preserving its two-branch GSConv topology."""
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        shortcut: bool = True,
+        g: int = 1,
+        e: float = 0.5,
+    ) -> None:
+        super().__init__()
+        hidden_channels = int(c2 * e)
+        self.cv1 = Conv(c1, hidden_channels, 1, 1)
+        self.gc2 = GSConvDPU(c1, hidden_channels, 3, 1, 1)
+        self.m = GSBottleneckCDPU(hidden_channels, hidden_channels, 3, 1)
+        self.cv3 = Conv(2 * hidden_channels, c2, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Fuse the GSConv and cheap bottleneck branches."""
+        bottleneck = self.m(self.cv1(x))
+        gsconv = self.gc2(x)
+        return self.cv3(torch.cat((gsconv, bottleneck), dim=1))
 
 
 class DPUSpatialAttentionBlock(nn.Module):

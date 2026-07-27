@@ -147,6 +147,16 @@ CPU post-processing consumes these three tensors and must reproduce the native F
 
 This boundary deliberately treats decode and NMS as host operations. It avoids forcing the twelve known Detect/decode blockers into the DPU graph while keeping the trainable detection head unchanged.
 
+## Post-Inspection GSConv Amendment
+
+The first random-weight DPU candidate inspection localized all 15 remaining CPU findings to the three `GSConv` instances inside layer 19 `VoVGSCSPC`. Each instance produced the same `reshape -> permute -> reshape` channel-shuffle pattern: the transpose was assigned to CPU and the surrounding layout operations followed it off the DPU. No other candidate-model node appeared in the hardware-constraints table.
+
+The DPU YAML therefore uses `VoVGSCSPCDPU`, composed from `GSConvDPU` and `GSBottleneckCDPU`. `GSConvDPU` preserves the original standard-convolution branch, 5x5 depthwise branch, concatenation, and channel ordering. It replaces only the tensor-layout shuffle with a one-hot pointwise convolution initialized to the identical permutation.
+
+The permutation weight remains an `nn.Conv2d` buffer rather than a trainable parameter. This keeps the operation visible to THOP, NNDCT, and Inspector as a standard convolution while preventing Ultralytics Trainer from enabling gradients and changing the permutation. The buffer is persistent in checkpoints and migration reports. Resource gates count all persistent deployment tensors, not only trainable parameters.
+
+The transformation must pass isolated GSConv and complete `VoVGSCSPC` FP32 parity checks when source and destination use the same activation modules. The actual checkpoint migration is not source-to-candidate equivalent because the DPU YAML intentionally replaces SiLU and C2PSFCA; the migration report records this distinction explicitly. DPU support remains an Inspector question: training cannot start until the revised graph reports no CPU assignment for the fixed pointwise shuffle or any other backbone/neck node.
+
 ## Weight Initialization
 
 A dedicated initialization tool will construct the DPU YAML model from the original checkpoint and produce a machine-readable migration report. It will never modify the source checkpoint.
@@ -159,7 +169,8 @@ Migration is divided into three classes:
    - slice BatchNorm weight, bias, running mean, and running variance identically;
    - copy the original `C2PSFCA.cv2` into `C2PSFCADPU.fuse`;
    - copy compatible PSA FFN parameters.
-3. New initialization for the spatial gate and channel bottleneck parameters whose semantics or shapes differ.
+3. Exact name-and-shape copies for `VoVGSCSPC -> VoVGSCSPCDPU`, plus deterministic one-hot initialization for its three new fixed shuffle buffers.
+4. New initialization for the spatial gate and channel bottleneck parameters whose semantics or shapes differ.
 
 The report records source and destination checkpoint hashes, exact-copy keys, transformed-copy keys, newly initialized keys, skipped keys, tensor counts, parameter counts, and migration percentages. Unexpected same-name shape mismatches are errors, not silent skips.
 
@@ -201,9 +212,9 @@ The Inspector CLI will accept either a `.pt` checkpoint or a model YAML as the g
 
 ### Resource Gates
 
-- Total model parameters do not exceed the original FSWD-YOLO by more than 10%.
+- Total persistent deployment tensors, including fixed buffers, do not exceed the original FSWD-YOLO by more than 10%.
 - Total FLOPs do not exceed the original FSWD-YOLO at 640x640.
-- The report includes module-level and model-level parameter/FLOP deltas.
+- The report includes trainable parameters, persistent buffers, total deployment tensors, and model-level parameter/FLOP deltas.
 
 ### Training Gate
 

@@ -14,6 +14,7 @@ DPU_YAML = REPO_ROOT / "ultralytics" / "cfg" / "models" / "11" / "fswd-yolo-dpu.
 ORIGINAL_YAML = REPO_ROOT / "ultralytics" / "cfg" / "models" / "11" / "fswd-yolo.yaml"
 MODULE_EXPORTS = REPO_ROOT / "ultralytics" / "nn" / "modules" / "__init__.py"
 TASKS_MODULE = REPO_ROOT / "ultralytics" / "nn" / "tasks.py"
+ENGINE_MODEL = REPO_ROOT / "ultralytics" / "engine" / "model.py"
 MIGRATION_MODULE = REPO_ROOT / "scripts" / "fswd_dpu_migration.py"
 MODEL_ADAPTER = REPO_ROOT / "scripts" / "fswd_dpu_model.py"
 DETECT_HEAD = REPO_ROOT / "ultralytics" / "nn" / "modules" / "head.py"
@@ -38,16 +39,20 @@ class DPUModelStaticContractTests(unittest.TestCase):
                 "DPUSpatialAttentionBlock",
                 "DPUChannelAttentionBlock",
                 "C2PSFCADPU",
+                "FixedChannelShuffle",
+                "GSConvDPU",
+                "GSBottleneckCDPU",
+                "VoVGSCSPCDPU",
             }.issubset(classes)
         )
 
-    def test_dpu_forward_paths_do_not_call_split_or_chunk(self):
+    def test_dpu_forward_paths_avoid_dpu_host_partition_operations(self):
         tree = self._module_tree()
         forbidden = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
-            if node.func.attr in {"split", "chunk"}:
+            if node.func.attr in {"split", "chunk", "reshape", "permute"}:
                 forbidden.append((node.func.attr, node.lineno))
 
         self.assertEqual(forbidden, [])
@@ -62,12 +67,31 @@ class DPUModelStaticContractTests(unittest.TestCase):
         self.assertIn("nn.Hardsigmoid", source)
         self.assertIn("nn.AdaptiveAvgPool2d", source)
 
+    def test_fixed_shuffle_weight_is_a_persistent_training_buffer(self):
+        source = DPU_MODULE.read_text(encoding="utf-8") if DPU_MODULE.is_file() else ""
+
+        self.assertIn("self.conv = nn.Conv2d", source)
+        self.assertIn('del self.conv._parameters["weight"]', source)
+        self.assertIn('self.conv.register_buffer("weight"', source)
+
+    def test_fixed_shuffle_is_excluded_from_global_weight_reset(self):
+        dpu_source = DPU_MODULE.read_text(encoding="utf-8") if DPU_MODULE.is_file() else ""
+        engine_source = ENGINE_MODEL.read_text(encoding="utf-8")
+
+        self.assertIn("_preserve_fixed_weight", dpu_source)
+        self.assertIn('not getattr(m, "_preserve_fixed_weight", False)', engine_source)
+
     def test_dpu_classes_are_exported_and_registered(self):
         exports = MODULE_EXPORTS.read_text(encoding="utf-8")
         tasks = TASKS_MODULE.read_text(encoding="utf-8")
 
         self.assertIn("from .fswd_dpu import", exports)
-        for class_name in ("C2PSFCADPU", "C3k2DPU", "C3k2GhostSimAMinnerDPU"):
+        for class_name in (
+            "C2PSFCADPU",
+            "C3k2DPU",
+            "C3k2GhostSimAMinnerDPU",
+            "VoVGSCSPCDPU",
+        ):
             self.assertIn(class_name, exports)
             self.assertIn(class_name, tasks)
 
@@ -81,6 +105,8 @@ class DPUModelStaticContractTests(unittest.TestCase):
         self.assertEqual(source.count("C3k2GhostSimAMinnerDPU"), 2)
         self.assertEqual(source.count("C3k2DPU"), 5)
         self.assertEqual(source.count("C2PSFCADPU"), 1)
+        self.assertEqual(source.count("VoVGSCSPCDPU"), 1)
+        self.assertNotIn("VoVGSCSPC,", source)
         self.assertEqual(source.count("Detect, [nc]"), 1)
 
         original_connections = [
@@ -106,6 +132,7 @@ class DPUModelStaticContractTests(unittest.TestCase):
                 "copy_matching_state",
                 "migrate_split_free_module",
                 "migrate_c2psfca",
+                "migrate_vovgscspc",
                 "migrate_fswd_model",
             }.issubset(functions)
         )
@@ -195,11 +222,86 @@ class DPUModelRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_fixed_channel_shuffle_matches_original_gsconv_permutation(self):
+        import torch
+
+        from ultralytics.nn.modules.fswd_dpu import FixedChannelShuffle
+
+        channels = 8
+        shuffle = FixedChannelShuffle(channels).eval()
+        x = torch.randn(2, channels, 5, 7, requires_grad=True)
+        expected = x.reshape(2, 2, channels // 2, 5, 7).permute(0, 2, 1, 3, 4).reshape_as(x)
+        actual = shuffle(x)
+
+        self.assertTrue(torch.equal(expected, actual))
+        self.assertEqual(dict(shuffle.named_parameters()), {})
+        self.assertIn("conv.weight", shuffle.state_dict())
+        self.assertEqual(int(torch.count_nonzero(shuffle.conv.weight).item()), channels)
+        actual.sum().backward()
+        self.assertIsNotNone(x.grad)
+
+    def test_vovgscspc_shuffle_migration_preserves_fp32_output_with_matched_activations(self):
+        import torch
+
+        from scripts.fswd_dpu_migration import migrate_vovgscspc
+        from ultralytics.nn.modules import Conv, VoVGSCSPC
+        from ultralytics.nn.modules.fswd_dpu import VoVGSCSPCDPU
+
+        torch.manual_seed(0)
+        previous = Conv.default_act
+        try:
+            Conv.default_act = torch.nn.SiLU()
+            source = VoVGSCSPC(128, 128).eval()
+            destination = VoVGSCSPCDPU(128, 128).eval()
+        finally:
+            Conv.default_act = previous
+        summary = migrate_vovgscspc(source, destination)
+        x = torch.randn(1, 128, 20, 20)
+
+        with torch.no_grad():
+            expected = source(x)
+            actual = destination(x)
+
+        absolute_error = (expected - actual).abs()
+        self.assertTrue(
+            torch.allclose(expected, actual, rtol=1e-5, atol=1e-6),
+            msg=(
+                f"VoVGSCSPC migration parity failed: "
+                f"max_absolute_error={absolute_error.max().item():.8g}, "
+                f"mean_absolute_error={absolute_error.mean().item():.8g}"
+            ),
+        )
+        self.assertEqual(len([name for name in summary.new if name.endswith(".shuffle.conv.weight")]), 3)
+        self.assertEqual(summary.unmapped, [])
+        self.assertEqual(summary.unexpected, [])
+
+    def test_model_reset_keeps_fixed_shuffle_weights(self):
+        import torch
+
+        from ultralytics import YOLO
+        from ultralytics.nn.modules.fswd_dpu import FixedChannelShuffle
+
+        model = YOLO(str(DPU_YAML))
+        shuffles = [module for module in model.model.modules() if isinstance(module, FixedChannelShuffle)]
+        before = [module.conv.weight.detach().clone() for module in shuffles]
+
+        model.reset_weights()
+
+        self.assertEqual(len(shuffles), 3)
+        for expected, module in zip(before, shuffles):
+            self.assertTrue(torch.equal(expected, module.conv.weight))
+
     def test_dpu_yaml_constructs_without_activation_leakage(self):
         import torch
 
         from ultralytics import YOLO
-        from ultralytics.nn.modules import C2PSFCADPU, C3k2DPU, C3k2GhostSimAMinnerDPU, Conv
+        from ultralytics.nn.modules import (
+            C2PSFCADPU,
+            C3k2DPU,
+            C3k2GhostSimAMinnerDPU,
+            Conv,
+            VoVGSCSPCDPU,
+        )
 
         previous = Conv.default_act
         try:
@@ -208,6 +310,7 @@ class DPUModelRuntimeTests(unittest.TestCase):
             self.assertEqual(sum(isinstance(item, C2PSFCADPU) for item in modules), 1)
             self.assertEqual(sum(isinstance(item, C3k2DPU) for item in modules), 5)
             self.assertEqual(sum(isinstance(item, C3k2GhostSimAMinnerDPU) for item in modules), 2)
+            self.assertEqual(sum(isinstance(item, VoVGSCSPCDPU) for item in modules), 1)
             self.assertTrue(
                 all(
                     isinstance(item.act, (torch.nn.Hardswish, torch.nn.Identity))

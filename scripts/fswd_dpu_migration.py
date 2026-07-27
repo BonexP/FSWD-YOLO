@@ -8,12 +8,13 @@ from typing import Any, Dict, Iterable, List, Tuple
 import torch
 from torch import nn
 
-from ultralytics.nn.modules import C2PSFCA, C3k2, C3k2GhostSimAMinner, Conv
+from ultralytics.nn.modules import C2PSFCA, C3k2, C3k2GhostSimAMinner, Conv, VoVGSCSPC
 from ultralytics.nn.modules.fswd_dpu import (
     C2PSFCADPU,
     C3k2DPU,
     C3k2GhostSimAMinnerDPU,
     SplitFreeC2f,
+    VoVGSCSPCDPU,
 )
 
 
@@ -179,6 +180,27 @@ def migrate_c2psfca(source: C2PSFCA, destination: C2PSFCADPU) -> MigrationSummar
     return summary
 
 
+def migrate_vovgscspc(source: VoVGSCSPC, destination: VoVGSCSPCDPU) -> MigrationSummary:
+    """Copy VoVGSCSPC state while retaining deterministic pointwise shuffle weights."""
+    summary = copy_matching_state(source, destination)
+    expected_new = {
+        "gc2.shuffle.conv.weight",
+        "m.conv_lighting.0.shuffle.conv.weight",
+        "m.conv_lighting.1.shuffle.conv.weight",
+    }
+    unexpected_new = sorted(set(summary.new) - expected_new)
+    missing_new = sorted(expected_new - set(summary.new))
+    if unexpected_new:
+        summary.unexpected.extend(f"unexpected new tensor {name}" for name in unexpected_new)
+    if missing_new:
+        summary.unexpected.extend(f"missing shuffle tensor {name}" for name in missing_new)
+    if summary.unmapped:
+        summary.unexpected.extend(f"unmapped tensor {name}" for name in summary.unmapped)
+    if summary.unexpected:
+        raise MigrationError("; ".join(summary.unexpected))
+    return summary
+
+
 def _paired_children(source: nn.Sequential, destination: nn.Sequential) -> Iterable[Tuple[int, nn.Module, nn.Module]]:
     if len(source) != len(destination):
         raise MigrationError(f"sequential length mismatch: {len(source)} != {len(destination)}")
@@ -192,6 +214,8 @@ def _migrate_pair(source: nn.Module, destination: nn.Module) -> MigrationSummary
         return migrate_split_free_module(source, destination)
     if isinstance(source, C2PSFCA) and isinstance(destination, C2PSFCADPU):
         return migrate_c2psfca(source, destination)
+    if isinstance(source, VoVGSCSPC) and isinstance(destination, VoVGSCSPCDPU):
+        return migrate_vovgscspc(source, destination)
     if isinstance(source, nn.Sequential) and isinstance(destination, nn.Sequential) and type(source) is type(destination):
         summary = MigrationSummary()
         for index, source_child, destination_child in _paired_children(source, destination):

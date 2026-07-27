@@ -599,6 +599,15 @@ class InspectorCliTests(unittest.TestCase):
 
 
 class InitializeDPUCliTests(unittest.TestCase):
+    def test_migration_semantics_distinguish_mapping_from_model_parity(self):
+        semantics = initialize_cli.migration_semantics()
+
+        self.assertFalse(semantics["source_to_candidate_fp32_equivalent"])
+        self.assertEqual(
+            semantics["gsconv_shuffle_rewrite"],
+            "exact_when_activation_modules_match",
+        )
+
     def test_initialize_cli_requires_checkpoint_config_and_output(self):
         parser = initialize_cli.build_parser()
 
@@ -716,6 +725,7 @@ class InitializeDPUCliTests(unittest.TestCase):
         self.assertTrue(any(isinstance(module, C2PSFCADPU) for module in reloaded.modules()))
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["migration"]["counts"]["unexpected"], 0)
+        self.assertFalse(report["migration_semantics"]["source_to_candidate_fp32_equivalent"])
         self.assertTrue(report["decode_parity"]["allclose"])
 
 
@@ -738,6 +748,15 @@ class ProfileDPUCandidateTests(unittest.TestCase):
         self.assertTrue(passing["flop_gate"])
         self.assertFalse(parameter_failure["parameter_gate"])
         self.assertFalse(flop_failure["flop_gate"])
+
+    def test_resource_gate_counts_persistent_deployment_buffers(self):
+        result = profile_cli.evaluate_resource_gates(
+            {"parameters": 100, "deployment_tensors": 100, "gflops": 20.0},
+            {"parameters": 100, "deployment_tensors": 111, "gflops": 19.0},
+        )
+
+        self.assertAlmostEqual(result["parameter_ratio"], 1.11)
+        self.assertFalse(result["parameter_gate"])
 
     def test_profile_cli_defaults_to_640(self):
         args = profile_cli.build_parser().parse_args(
@@ -804,16 +823,17 @@ DetectionModel::custom    nndct_custom    Target-specific constraint.
         self.assertEqual(summary["unique_node_count"], 3)
         self.assertEqual(
             summary["category_counts"],
-            {"direct_unsupported": 1, "downstream_cpu": 1, "other_cpu_constraint": 1},
+            {"direct_cpu_assignment": 1, "direct_unsupported": 1, "other_cpu_constraint": 1},
         )
         self.assertEqual(
             summary["operators_by_category"],
             {
+                "direct_cpu_assignment": {"nndct_permute": 1},
                 "direct_unsupported": {"aten::silu": 1},
-                "downstream_cpu": {"nndct_permute": 1},
                 "other_cpu_constraint": {"nndct_custom": 1},
             },
         )
+        self.assertEqual(summary["direct_blockers"]["nndct_permute"]["count"], 1)
         self.assertEqual(summary["direct_blockers"]["aten::silu"]["count"], 1)
         self.assertEqual(len(summary["direct_blockers"]["aten::silu"]["examples"]), 1)
         self.assertTrue(summary["requires_cpu_fallback"])
@@ -839,6 +859,14 @@ DetectionModel::custom    nndct_custom    Target-specific constraint.
                     vitis_report.classify_constraint_reason(reason),
                     "direct_unsupported",
                 )
+
+    def test_plain_cpu_assignment_is_a_direct_partition_blocker(self):
+        reason = "xir::Op{name = shuffle, type = transpose} has been assigned to CPU."
+
+        self.assertEqual(
+            vitis_report.classify_constraint_reason(reason),
+            "direct_cpu_assignment",
+        )
 
     def test_file_summary_records_resolved_report_path(self):
         with tempfile.TemporaryDirectory() as directory:

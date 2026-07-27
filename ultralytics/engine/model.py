@@ -353,7 +353,7 @@ class Model(torch.nn.Module):
         """
         self._check_is_pytorch_model()
         for m in self.model.modules():
-            if hasattr(m, "reset_parameters"):
+            if hasattr(m, "reset_parameters") and not getattr(m, "_preserve_fixed_weight", False):
                 m.reset_parameters()
         for p in self.model.parameters():
             p.requires_grad = True

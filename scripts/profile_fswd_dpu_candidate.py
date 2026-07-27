@@ -42,10 +42,17 @@ def evaluate_resource_gates(baseline: Dict[str, Any], candidate: Dict[str, Any])
     """Evaluate the approved parameter and FLOP limits."""
     if baseline["parameters"] <= 0 or baseline["gflops"] <= 0:
         raise ValueError("Baseline parameters and GFLOPs must be greater than zero")
-    parameter_ratio = candidate["parameters"] / baseline["parameters"]
+    baseline_deployment = baseline.get("deployment_tensors", baseline["parameters"])
+    candidate_deployment = candidate.get("deployment_tensors", candidate["parameters"])
+    if baseline_deployment <= 0:
+        raise ValueError("Baseline deployment tensor count must be greater than zero")
+    parameter_ratio = candidate_deployment / baseline_deployment
+    learned_parameter_ratio = candidate["parameters"] / baseline["parameters"]
     flop_ratio = candidate["gflops"] / baseline["gflops"]
     return {
         "parameter_ratio": parameter_ratio,
+        "learned_parameter_ratio": learned_parameter_ratio,
+        "parameter_basis": "deployment_tensors",
         "flop_ratio": flop_ratio,
         "parameter_gate": parameter_ratio <= 1.10,
         "flop_gate": flop_ratio <= 1.0,
@@ -64,11 +71,14 @@ def _module_type_parameters(model: Any) -> Dict[str, int]:
 
 def _profile_model(model: Any, imgsz: int, get_flops: Any) -> Dict[str, Any]:
     parameters = sum(parameter.numel() for parameter in model.parameters())
+    deployment_tensors = sum(tensor.numel() for tensor in model.state_dict().values())
     gflops = float(get_flops(model, imgsz))
     if gflops <= 0.0:
         raise RuntimeError("FLOP profiling returned zero; verify thop and the model forward path")
     return {
         "parameters": int(parameters),
+        "persistent_buffers": int(deployment_tensors - parameters),
+        "deployment_tensors": int(deployment_tensors),
         "gflops": gflops,
         "parameters_by_module_type": _module_type_parameters(model),
     }
