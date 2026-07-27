@@ -81,6 +81,18 @@ def validate_weights(path: Path) -> Path:
     return resolved
 
 
+def validate_model_config(path: Path) -> Path:
+    """Return a resolved YAML model configuration path after strict validation."""
+    resolved = Path(path).expanduser().resolve()
+    if resolved.suffix.lower() not in {".yaml", ".yml"}:
+        raise ValueError(f"Model config path must use the .yaml or .yml suffix: {resolved}")
+    if not resolved.exists():
+        raise FileNotFoundError(f"Model config file does not exist: {resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"Model config path is not a file: {resolved}")
+    return resolved
+
+
 def prepare_output(path: Path, overwrite: bool, expected_suffix: str = ".onnx") -> Path:
     """Validate an output path and protect existing artifacts."""
     resolved = Path(path).expanduser().resolve()

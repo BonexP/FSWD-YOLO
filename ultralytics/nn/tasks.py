@@ -71,9 +71,11 @@ from ultralytics.nn.modules import (
     C3k2Ghost,
     C3k2GhostSimAM,
     C3k2GhostSimAMinner,
+    C3k2GhostSimAMinnerDPU,
+    C3k2DPU,
     VoVGSCSP, VoVGSCSPC,
     FCA_Attention,
-    C2PSFCA, C2FCA, PAPSAFCA,
+    C2PSFCA, C2PSFCADPU, C2FCA, PAPSAFCA,
     DebiFormer,
     NewConcat
 )
@@ -1611,8 +1613,8 @@ def parse_model(d, ch, verbose=True):
             LOGGER.warning(f"no model scale passed. Assuming scale='{scale}'.")
         depth, width, max_channels = scales[scale]
 
+    model_default_act = eval(act) if act else None
     if act:
-        Conv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = torch.nn.SiLU()
         if verbose:
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
 
@@ -1664,10 +1666,13 @@ def parse_model(d, ch, verbose=True):
             C3k2Ghost,
             C3k2GhostSimAM,
             C3k2GhostSimAMinner,
+            C3k2GhostSimAMinnerDPU,
+            C3k2DPU,
             VoVGSCSP,
             VoVGSCSPC,
             FCA_Attention,
             C2PSFCA,
+            C2PSFCADPU,
             C2FCA,
             PAPSAFCA,
             DebiFormer
@@ -1689,7 +1694,8 @@ def parse_model(d, ch, verbose=True):
             RepC3,
             C2fPSA,
             C2fCIB,
-            C2PSA,C2FCA,C2PSFCA, PAPSAFCA,
+            C2PSA,C2FCA,C2PSFCA,C2PSFCADPU, PAPSAFCA,
+            C3k2DPU,
             A2C2f,
             DebiFormer
         }
@@ -1721,7 +1727,7 @@ def parse_model(d, ch, verbose=True):
             if m in repeat_modules:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            if m is C3k2:  # for M/L/X sizes
+            if m in {C3k2, C3k2DPU}:  # for M/L/X sizes
                 legacy = False
                 if scale in "mlx":
                     args[3] = True
@@ -1812,7 +1818,13 @@ def parse_model(d, ch, verbose=True):
         else:
             c2 = ch[f]
 
-        m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        previous_default_act = Conv.default_act
+        try:
+            if model_default_act is not None:
+                Conv.default_act = model_default_act
+            m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        finally:
+            Conv.default_act = previous_default_act
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type

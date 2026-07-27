@@ -21,6 +21,8 @@ if str(REPO_ROOT) not in sys.path:
 from scripts import fswd_deploy_common as common  # noqa: E402
 from scripts import export_fswd_onnx as export_cli  # noqa: E402
 from scripts import inspect_fswd_vitis as inspect_cli  # noqa: E402
+from scripts import initialize_fswd_dpu as initialize_cli  # noqa: E402
+from scripts import profile_fswd_dpu_candidate as profile_cli  # noqa: E402
 from scripts import fswd_vitis_report as vitis_report  # noqa: E402
 
 
@@ -68,6 +70,18 @@ class CommonUtilitiesTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileNotFoundError, "does not exist"):
                 common.validate_weights(path)
+
+    def test_validate_model_config_requires_existing_yaml_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = root / "model.txt"
+            invalid.write_text("nc: 6", encoding="utf-8")
+            valid = root / "model.yaml"
+            valid.write_text("nc: 6", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "yaml or .yml"):
+                common.validate_model_config(invalid)
+            self.assertEqual(common.validate_model_config(valid), valid.resolve())
 
     def test_prepare_output_rejects_existing_file_without_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -281,8 +295,12 @@ class InspectorCliTests(unittest.TestCase):
         self.assertEqual(report["rtol"], 1e-5)
         self.assertEqual(report["atol"], 1e-6)
 
-    def test_model_preparation_disables_inplace_silu_without_changing_c2f(self):
+    def test_model_preparation_disables_inplace_activations_without_changing_c2f(self):
         class FakeSiLU:
+            def __init__(self, inplace):
+                self.inplace = inplace
+
+        class FakeHardswish:
             def __init__(self, inplace):
                 self.inplace = inplace
 
@@ -298,18 +316,26 @@ class InspectorCliTests(unittest.TestCase):
 
         inplace_silu = FakeSiLU(inplace=True)
         safe_silu = FakeSiLU(inplace=False)
+        inplace_hardswish = FakeHardswish(inplace=True)
         c2f = FakeC2f()
         unrelated = Unrelated()
-        model = SimpleNamespace(modules=lambda: [model, inplace_silu, safe_silu, c2f, unrelated])
+        model = SimpleNamespace(
+            modules=lambda: [model, inplace_silu, safe_silu, inplace_hardswish, c2f, unrelated]
+        )
 
-        changes = inspect_cli.prepare_model_for_vitis_inspection(model, FakeSiLU)
+        changes = inspect_cli.prepare_model_for_vitis_inspection(model, FakeSiLU, FakeHardswish)
 
         self.assertEqual(
             changes,
-            {"silu_inplace_disabled": 1, "c2f_forward_split_enabled": 0},
+            {
+                "silu_inplace_disabled": 1,
+                "hardswish_inplace_disabled": 1,
+                "c2f_forward_split_enabled": 0,
+            },
         )
         self.assertFalse(inplace_silu.inplace)
         self.assertFalse(safe_silu.inplace)
+        self.assertFalse(inplace_hardswish.inplace)
         self.assertEqual(c2f.forward("input"), ("chunk", "input"))
         self.assertFalse(hasattr(unrelated, "inplace"))
 
@@ -478,7 +504,73 @@ class InspectorCliTests(unittest.TestCase):
         self.assertEqual(args.verbose_level, 2)
         self.assertEqual(args.image_format, "svg")
         self.assertEqual(args.activation_experiment, "none")
+        self.assertFalse(args.raw_detect_output)
         self.assertFalse(args.overwrite)
+
+    def test_inspector_requires_exactly_one_model_source(self):
+        parser = inspect_cli.build_parser()
+        required = ["--target", "TARGET", "--output-dir", "inspect"]
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(required)
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                ["--weights", "best.pt", "--model-config", "model.yaml", *required]
+            )
+
+        config_args = parser.parse_args(["--model-config", "model.yaml", *required])
+        self.assertEqual(config_args.model_config, Path("model.yaml"))
+
+    def test_yaml_candidate_rejects_activation_experiments(self):
+        parser = inspect_cli.build_parser()
+        args = parser.parse_args(
+            [
+                "--model-config",
+                "model.yaml",
+                "--target",
+                "TARGET",
+                "--output-dir",
+                "inspect",
+                "--activation-experiment",
+                "hardswish",
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "YAML candidate"):
+            inspect_cli.validate_source_arguments(args)
+
+    def test_model_source_manifest_distinguishes_weights_and_yaml(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "best.pt"
+            config = root / "model.yaml"
+            weights.write_bytes(b"checkpoint")
+            config.write_text("nc: 6", encoding="utf-8")
+
+            trained = inspect_cli.model_source_metadata("weights", weights.resolve())
+            candidate = inspect_cli.model_source_metadata("model_config", config.resolve())
+
+        self.assertEqual(trained["kind"], "trained_checkpoint")
+        self.assertEqual(trained["weight_state"], "trained")
+        self.assertEqual(candidate["kind"], "model_config_candidate")
+        self.assertEqual(candidate["weight_state"], "random_initialization")
+        self.assertEqual(trained["sha256"], hashlib.sha256(b"checkpoint").hexdigest())
+
+    def test_inspector_accepts_raw_detect_output_mode(self):
+        parser = inspect_cli.build_parser()
+        args = parser.parse_args(
+            [
+                "--model-config",
+                "model.yaml",
+                "--target",
+                "TARGET",
+                "--output-dir",
+                "inspect",
+                "--raw-detect-output",
+            ]
+        )
+
+        self.assertTrue(args.raw_detect_output)
 
     def test_inspector_accepts_only_named_activation_experiments(self):
         parser = inspect_cli.build_parser()
@@ -504,6 +596,192 @@ class InspectorCliTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileExistsError, "--overwrite"):
                 inspect_cli.prepare_manifest(Path(directory), overwrite=False)
+
+
+class InitializeDPUCliTests(unittest.TestCase):
+    def test_initialize_cli_requires_checkpoint_config_and_output(self):
+        parser = initialize_cli.build_parser()
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args([])
+        args = parser.parse_args(
+            [
+                "--source-checkpoint",
+                "best.pt",
+                "--model-config",
+                "fswd-yolo-dpu.yaml",
+                "--output",
+                "fswd-yolo-dpu-init.pt",
+            ]
+        )
+        self.assertEqual(args.imgsz, 640)
+        self.assertFalse(args.overwrite)
+
+    def test_initialize_report_path_appends_migration_json(self):
+        self.assertEqual(
+            initialize_cli.migration_report_path(Path("model.pt")),
+            Path("model.pt.migration.json"),
+        )
+
+    def test_initialize_artifacts_require_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "model.pt"
+            report = Path(directory) / "report.json"
+            output.write_bytes(b"existing")
+
+            with self.assertRaisesRegex(FileExistsError, "--overwrite"):
+                initialize_cli.prepare_artifacts(output, report, overwrite=False)
+
+    def test_initialize_rejects_non_positive_image_size(self):
+        parser = initialize_cli.build_parser()
+        args = parser.parse_args(
+            [
+                "--source-checkpoint",
+                "best.pt",
+                "--model-config",
+                "model.yaml",
+                "--output",
+                "output.pt",
+                "--imgsz",
+                "0",
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            initialize_cli.validate_arguments(args)
+
+    def test_initialize_direct_script_checks_dependencies_without_installing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint = root / "best.pt"
+            config = root / "model.yaml"
+            output = root / "output.pt"
+            checkpoint.write_bytes(b"checkpoint")
+            config.write_text("nc: 6", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    str(REPO_ROOT / "scripts" / "initialize_fswd_dpu.py"),
+                    "--source-checkpoint",
+                    str(checkpoint),
+                    "--model-config",
+                    str(config),
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("  - torch:", result.stderr)
+        self.assertIn("does not install packages", result.stderr)
+
+    @unittest.skipUnless(importlib.util.find_spec("torch") is not None, "PyTorch is required")
+    def test_initialize_checkpoint_round_trip(self):
+        import torch
+
+        from ultralytics import YOLO
+        from ultralytics.nn.modules.fswd_dpu import C2PSFCADPU
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "source.pt"
+            output_path = root / "dpu-init.pt"
+            report_path = root / "migration.json"
+            source_model = YOLO(str(REPO_ROOT / "ultralytics/cfg/models/11/fswd-yolo.yaml")).model
+            torch.save({"model": source_model, "train_args": {}}, source_path)
+            before_hash = common.sha256_file(source_path)
+            args = initialize_cli.build_parser().parse_args(
+                [
+                    "--source-checkpoint",
+                    str(source_path),
+                    "--model-config",
+                    str(REPO_ROOT / "ultralytics/cfg/models/11/fswd-yolo-dpu.yaml"),
+                    "--output",
+                    str(output_path),
+                    "--report",
+                    str(report_path),
+                ]
+            )
+
+            self.assertEqual(initialize_cli.run(args), 0)
+            self.assertEqual(common.sha256_file(source_path), before_hash)
+            reloaded = YOLO(str(output_path)).model
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(any(isinstance(module, C2PSFCADPU) for module in reloaded.modules()))
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["migration"]["counts"]["unexpected"], 0)
+        self.assertTrue(report["decode_parity"]["allclose"])
+
+
+class ProfileDPUCandidateTests(unittest.TestCase):
+    def test_resource_gates_enforce_parameter_and_flop_limits(self):
+        passing = profile_cli.evaluate_resource_gates(
+            {"parameters": 100, "gflops": 20.0},
+            {"parameters": 110, "gflops": 20.0},
+        )
+        parameter_failure = profile_cli.evaluate_resource_gates(
+            {"parameters": 100, "gflops": 20.0},
+            {"parameters": 111, "gflops": 19.0},
+        )
+        flop_failure = profile_cli.evaluate_resource_gates(
+            {"parameters": 100, "gflops": 20.0},
+            {"parameters": 100, "gflops": 20.1},
+        )
+
+        self.assertTrue(passing["parameter_gate"])
+        self.assertTrue(passing["flop_gate"])
+        self.assertFalse(parameter_failure["parameter_gate"])
+        self.assertFalse(flop_failure["flop_gate"])
+
+    def test_profile_cli_defaults_to_640(self):
+        args = profile_cli.build_parser().parse_args(
+            [
+                "--baseline-config",
+                "baseline.yaml",
+                "--candidate-config",
+                "candidate.yaml",
+                "--output",
+                "profile.json",
+            ]
+        )
+
+        self.assertEqual(args.imgsz, 640)
+        self.assertFalse(args.overwrite)
+
+    def test_profile_direct_script_only_checks_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.yaml"
+            candidate = root / "candidate.yaml"
+            output = root / "profile.json"
+            baseline.write_text("nc: 6", encoding="utf-8")
+            candidate.write_text("nc: 6", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    str(REPO_ROOT / "scripts" / "profile_fswd_dpu_candidate.py"),
+                    "--baseline-config",
+                    str(baseline),
+                    "--candidate-config",
+                    str(candidate),
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("does not install packages", result.stderr)
 
 
 class VitisReportTests(unittest.TestCase):

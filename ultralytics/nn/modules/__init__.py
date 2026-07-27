@@ -113,6 +113,7 @@ from .transformer import (
 # from .convnext import ConvNeXt, Block,LayerNorm
 
 from .debiformer import DebiFormer
+from .fswd_dpu import C2PSFCADPU, C3k2DPU, C3k2GhostSimAMinnerDPU
 
 __all__ = (
     "Conv",
@@ -196,10 +197,13 @@ __all__ = (
     "C3k2Ghost",
     "C3k2GhostSimAM",
     "C3k2GhostSimAMinner",
+    "C3k2GhostSimAMinnerDPU",
+    "C3k2DPU",
     "VoVGSCSP",
     "VoVGSCSPC",
     "FCA_Attention",
     "C2FCA","C2PSFCA",
+    "C2PSFCADPU",
     "PAPSAFCA",
     "DebiFormer",
     "NewConcat"

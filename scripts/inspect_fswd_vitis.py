@@ -10,7 +10,7 @@ import platform
 import sys
 from pathlib import Path
 from types import MethodType
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 try:
     from scripts import fswd_deploy_common as common
@@ -42,13 +42,28 @@ def activation_mode_metadata(activation_experiment: str) -> Dict[str, Any]:
     }
 
 
-def prepare_model_for_vitis_inspection(model: Any, silu_class: Any) -> Dict[str, int]:
+def prepare_model_for_vitis_inspection(
+    model: Any,
+    silu_class: Any,
+    hardswish_class: Any = None,
+) -> Dict[str, int]:
     """Apply semantics-preserving graph forms preferred by Vitis AI Inspector."""
-    changes = {"silu_inplace_disabled": 0, "c2f_forward_split_enabled": 0}
+    changes = {
+        "silu_inplace_disabled": 0,
+        "hardswish_inplace_disabled": 0,
+        "c2f_forward_split_enabled": 0,
+    }
     for module in model.modules():
         if isinstance(module, silu_class) and getattr(module, "inplace", False):
             module.inplace = False
             changes["silu_inplace_disabled"] += 1
+        if (
+            hardswish_class is not None
+            and isinstance(module, hardswish_class)
+            and getattr(module, "inplace", False)
+        ):
+            module.inplace = False
+            changes["hardswish_inplace_disabled"] += 1
 
     return changes
 
@@ -114,6 +129,39 @@ def compare_prediction_tensors(
         "allclose": bool(torch_module.allclose(before, after, rtol=rtol, atol=atol)),
         "max_absolute_error": float(absolute_error.max().item()),
         "mean_absolute_error": float(absolute_error.mean().item()),
+        "rtol": rtol,
+        "atol": atol,
+    }
+
+
+def compare_prediction_sequences(
+    torch_module: Any,
+    before: Sequence[Any],
+    after: Sequence[Any],
+    rtol: float,
+    atol: float,
+) -> Dict[str, Any]:
+    """Compare one or more prediction tensors without hiding output-count changes."""
+    output_count_matches = len(before) == len(after)
+    comparisons = []
+    if output_count_matches:
+        comparisons = [
+            compare_prediction_tensors(torch_module, before_value, after_value, rtol, atol)
+            for before_value, after_value in zip(before, after)
+        ]
+    shape_matches = output_count_matches and all(item["shape_matches"] for item in comparisons)
+    allclose = shape_matches and all(item["allclose"] for item in comparisons)
+    maximums = [item["max_absolute_error"] for item in comparisons if item["max_absolute_error"] is not None]
+    means = [item["mean_absolute_error"] for item in comparisons if item["mean_absolute_error"] is not None]
+    return {
+        "before_shapes": [list(value.shape) for value in before],
+        "after_shapes": [list(value.shape) for value in after],
+        "output_count_matches": output_count_matches,
+        "shape_matches": shape_matches,
+        "allclose": allclose,
+        "max_absolute_error": max(maximums) if maximums else None,
+        "mean_absolute_error": sum(means) / len(means) if means else None,
+        "outputs": comparisons,
         "rtol": rtol,
         "atol": atol,
     }
@@ -190,11 +238,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Inspect an FSWD-YOLO PyTorch graph for an explicit Vitis AI target."
     )
-    parser.add_argument("--weights", required=True, type=Path, help="Input Ultralytics .pt checkpoint")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--weights", type=Path, help="Input Ultralytics .pt checkpoint")
+    source.add_argument("--model-config", type=Path, help="Input Ultralytics YAML model candidate")
     parser.add_argument(
         "--target",
         required=True,
         help="Vitis AI Inspector target name or fingerprint for the intended hardware",
+    )
+    parser.add_argument(
+        "--raw-detect-output",
+        action="store_true",
+        help="Inspect only convolutional Detect outputs; decode and NMS remain on the host",
     )
     parser.add_argument("--output-dir", required=True, type=Path, help="Inspector output directory")
     parser.add_argument("--imgsz", type=int, default=640, help="Square input size (default: 640)")
@@ -220,6 +275,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0, help="Inspector input seed (default: 0)")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing manifest")
     return parser
+
+
+def validate_source_arguments(args: argparse.Namespace) -> Tuple[str, Path]:
+    """Validate the selected model source and candidate-only restrictions."""
+    if args.model_config is not None:
+        if args.activation_experiment != "none":
+            raise ValueError("A YAML candidate cannot be combined with --activation-experiment")
+        return "model_config", common.validate_model_config(args.model_config)
+    return "weights", common.validate_weights(args.weights)
+
+
+def model_source_metadata(source_kind: str, source_path: Path) -> Dict[str, str]:
+    """Describe whether Inspector is evaluating trained weights or a random candidate."""
+    if source_kind == "weights":
+        kind = "trained_checkpoint"
+        weight_state = "trained"
+    elif source_kind == "model_config":
+        kind = "model_config_candidate"
+        weight_state = "random_initialization"
+    else:
+        raise ValueError(f"unsupported model source kind: {source_kind}")
+    return {
+        "kind": kind,
+        "path": str(source_path),
+        "sha256": common.sha256_file(source_path),
+        "weight_state": weight_state,
+    }
 
 
 def inspector_requirements() -> Dict[str, str]:
@@ -249,7 +331,13 @@ def _serialize_arguments(args: argparse.Namespace) -> Dict[str, Any]:
     return {name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()}
 
 
-def _base_manifest(args: argparse.Namespace, weights: Path, output_dir: Path) -> Dict[str, Any]:
+def _base_manifest(
+    args: argparse.Namespace,
+    source_kind: str,
+    source_path: Path,
+    output_dir: Path,
+) -> Dict[str, Any]:
+    source_metadata = model_source_metadata(source_kind, source_path)
     return {
         "tool": "inspect_fswd_vitis",
         "status": "running",
@@ -257,11 +345,15 @@ def _base_manifest(args: argparse.Namespace, weights: Path, output_dir: Path) ->
         "arguments": _serialize_arguments(args),
         "target": args.target,
         "input": {
-            "weights": str(weights),
-            "weights_sha256": common.sha256_file(weights),
+            "model_source": source_metadata,
+            source_kind: str(source_path),
+            f"{source_kind}_sha256": source_metadata["sha256"],
             "tensor_shape": [1, 3, args.imgsz, args.imgsz],
             "dtype": "float32",
             "device": "cpu",
+            "output_contract": (
+                "raw_detect_feature_maps" if args.raw_detect_output else "decoded_predictions"
+            ),
         },
         "output_dir": str(output_dir),
         "git": common.git_metadata(REPO_ROOT),
@@ -282,10 +374,10 @@ def run(args: argparse.Namespace) -> int:
     if not args.target.strip():
         raise ValueError("--target must not be empty")
 
-    weights = common.validate_weights(args.weights)
+    source_kind, source_path = validate_source_arguments(args)
     output_dir = Path(args.output_dir).expanduser().resolve()
     manifest = prepare_manifest(output_dir, args.overwrite)
-    payload = _base_manifest(args, weights, output_dir)
+    payload = _base_manifest(args, source_kind, source_path, output_dir)
 
     os.environ["YOLO_AUTOINSTALL"] = "false"
     try:
@@ -298,6 +390,7 @@ def run(args: argparse.Namespace) -> int:
         from pytorch_nndct.apis import Inspector
         from pytorch_nndct.hardware_v3.inspector import InspectorImpl
         from ultralytics import YOLO
+        from scripts.fswd_dpu_model import RawDetectHeadAdapter
         from scripts.export_fswd_onnx import normalize_torch_prediction
 
         compatibility_applied = install_vitis_35_permute_report_compatibility(
@@ -308,15 +401,26 @@ def run(args: argparse.Namespace) -> int:
             "scope": "Inspector report messages only",
         }
 
-        model = YOLO(str(weights)).model.float().eval().cpu()
+        model = YOLO(str(source_path)).model.float().eval().cpu()
+        inspection_model = RawDetectHeadAdapter(model).eval() if args.raw_detect_output else model
         torch.manual_seed(args.seed)
         dummy = torch.randn(1, 3, args.imgsz, args.imgsz, dtype=torch.float32)
-        with torch.no_grad():
-            before_preparation = (
-                normalize_torch_prediction(model(dummy)).detach().cpu().clone()
-            )
 
-        preparation_changes = prepare_model_for_vitis_inspection(model, torch.nn.SiLU)
+        def normalized_outputs(output: Any) -> Tuple[Any, ...]:
+            if args.raw_detect_output:
+                if not isinstance(output, (list, tuple)) or not all(
+                    isinstance(value, torch.Tensor) for value in output
+                ):
+                    raise TypeError("raw Detect inspection requires a tensor sequence")
+                return tuple(value.detach().cpu().clone() for value in output)
+            return (normalize_torch_prediction(output).detach().cpu().clone(),)
+
+        with torch.no_grad():
+            before_preparation = normalized_outputs(inspection_model(dummy))
+
+        preparation_changes = prepare_model_for_vitis_inspection(
+            model, torch.nn.SiLU, torch.nn.Hardswish
+        )
         mode = activation_mode_metadata(args.activation_experiment)
         if args.activation_experiment == "none":
             preparation_changes["silu_activation_replaced"] = 0
@@ -330,10 +434,8 @@ def run(args: argparse.Namespace) -> int:
                 )
             )
         with torch.no_grad():
-            after_preparation = (
-                normalize_torch_prediction(model(dummy)).detach().cpu().clone()
-            )
-        preparation_parity = compare_prediction_tensors(
+            after_preparation = normalized_outputs(inspection_model(dummy))
+        preparation_parity = compare_prediction_sequences(
             torch,
             before_preparation,
             after_preparation,
@@ -358,7 +460,7 @@ def run(args: argparse.Namespace) -> int:
 
         reports_before = vitis_report.snapshot_report_signatures(output_dir)
         Inspector(args.target).inspect(
-            model,
+            inspection_model,
             (dummy,),
             device=torch.device("cpu"),
             output_dir=str(output_dir),

@@ -84,6 +84,7 @@ class Detect(nn.Module):
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
         super().__init__()
+        self.raw_output = False
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
@@ -118,7 +119,7 @@ class Detect(nn.Module):
 
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
-        if self.training:  # Training path
+        if self.training or getattr(self, "raw_output", False):  # Training or explicit deployment-head path
             return x
         y = self._inference(x)
         return y if self.export else (y, x)

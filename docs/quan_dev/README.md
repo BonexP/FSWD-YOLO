@@ -120,6 +120,68 @@ python scripts/inspect_fswd_vitis.py \
 
 比较三个 manifest 的 `inspection_summary.direct_blockers`、`operators_by_category` 和 `category_counts`，并对照 Inspector 控制台的 device/DPU subgraph 数量。只有直接阻塞算子减少且 DPU 分区更连续，才能把某个激活函数列为后续训练候选；这仍不等于量化、编译或板上运行已经通过。
 
+## 3. DPU 候选模型的训练前筛选
+
+原始 `fswd-yolo.yaml` 和 `C2PSFCA` 保持不变。DPU 候选使用独立的 `ultralytics/cfg/models/11/fswd-yolo-dpu.yaml`：全局卷积激活为 Hardswish，C2f 类模块使用独立投影替代通道切片，`C2PSFCADPU` 仍保留 keep、spatial 和 channel 三分支。Detect 的卷积预测头保留在候选图中，DFL、框解码、sigmoid 和 NMS 留在主机端。
+
+先在具有完整 PyTorch/Ultralytics/thop 环境的代码主机运行资源门槛检查：
+
+```bash
+python scripts/profile_fswd_dpu_candidate.py \
+  --baseline-config ultralytics/cfg/models/11/fswd-yolo.yaml \
+  --candidate-config ultralytics/cfg/models/11/fswd-yolo-dpu.yaml \
+  --imgsz 640 \
+  --output /data/deploy/fswd-dpu-profile.json \
+  --overwrite
+```
+
+通过条件为候选参数量不超过原模型的 110%，并且候选 GFLOPs 不高于原模型。缺少 `thop` 或 FLOP 计算返回 0 时工具会失败，不会把未知结果当作通过。
+
+如果需要从现有 `best.pt` 初始化可训练候选，执行：
+
+```bash
+python scripts/initialize_fswd_dpu.py \
+  --source-checkpoint /data/weights/best.pt \
+  --model-config ultralytics/cfg/models/11/fswd-yolo-dpu.yaml \
+  --output /data/deploy/fswd-yolo-dpu-init.pt \
+  --report /data/deploy/fswd-yolo-dpu-init.migration.json \
+  --imgsz 640 \
+  --overwrite
+```
+
+迁移工具会把原 C2f 融合投影的输出通道复制到独立投影，记录 C2PSFCA 重设计中新增和有意不映射的参数，并验证候选模型的 raw Detect 输出经过原生主机解码后与其常规 FP32 推理一致。源 checkpoint 不会被修改。生成的初始化 checkpoint 采用了新的激活函数和注意力结构，因此在重新训练或微调并验证之前不具备精度结论。
+
+在 Vitis AI 3.5 主机上可以先检查随机权重候选图。这个步骤只判断图结构和 target 分区，不判断精度：
+
+```bash
+python scripts/inspect_fswd_vitis.py \
+  --model-config ultralytics/cfg/models/11/fswd-yolo-dpu.yaml \
+  --target DPUCZDX8G_ISA1_B4096 \
+  --raw-detect-output \
+  --output-dir /workspace/inspect_fswd_dpu_candidate \
+  --overwrite
+```
+
+也可以检查已初始化或后续训练得到的 DPU checkpoint：
+
+```bash
+python scripts/inspect_fswd_vitis.py \
+  --weights /workspace/fswd-yolo-dpu-init.pt \
+  --target DPUCZDX8G_ISA1_B4096 \
+  --raw-detect-output \
+  --output-dir /workspace/inspect_fswd_dpu_checkpoint \
+  --overwrite
+```
+
+`inspection_manifest.json` 的 `input.model_source.weight_state` 会区分 `random_initialization` 与 `trained`，`input.output_contract` 应为 `raw_detect_feature_maps`。检查报告：
+
+```bash
+python -m json.tool /workspace/inspect_fswd_dpu_candidate/inspection_manifest.json
+grep -n "assigned to CPU\|can't be converted to XIR" /workspace/inspect_fswd_dpu_candidate/inspect_*.txt
+```
+
+训练前图门槛要求 backbone、neck、`C2PSFCADPU`、卷积 Detect 头和三张 raw 输出中没有直接不支持或被迫分配到 CPU 的节点，并且 Inspector 控制台至少报告一个 DPU subgraph。`DPUCZDX8G_ISA1_B4096` 目前仅用于软件筛选；确定板卡后仍须使用该平台实际 `arch.json` 或 fingerprint 重新量化、编译和验证。
+
 ## Vitis 环境依赖原则
 
 不要在 Vitis AI 环境中使用 `conda install timm` 或 `conda install onnx`。Conda 求解可能替换 AMD 容器预装的 PyTorch/NNDCT 组合，使 `pytorch_nndct` 再次不可导入。
